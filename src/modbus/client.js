@@ -181,6 +181,15 @@ export class ModbusSession {
 
   /** Ended by the integration. */
   abort(message = 'aborted') {
+    if (this.dead) {
+      // Already ending (a graceful close waiting for the heat pump): at once now.
+      try {
+        this.socket.destroy();
+      } catch {
+        // Already closed.
+      }
+      return;
+    }
     this.fail(new ModbusError(ERROR_KINDS.ABORTED, message));
   }
 

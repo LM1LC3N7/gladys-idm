@@ -107,6 +107,8 @@ class FakeSocket extends EventEmitter {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    if (!this.ending) this.hp.clientDestroys += 1;
+    if (this.closeTimer) this.hp.timers.clearTimeout(this.closeTimer);
     // Like a real device, the heat pump sees the connection gone a moment later.
     setImmediate(() => {
       this.hp.open.delete(this);
@@ -114,9 +116,15 @@ class FakeSocket extends EventEmitter {
     });
   }
 
-  /** A FIN: the fake closes its side at once. */
+  /** A FIN: the heat pump closes its side `closeDelay` ms later (then 'close'). */
   end() {
-    this.destroy();
+    if (this.destroyed || this.ended) return;
+    this.ended = true;
+    this.hp.ends += 1;
+    this.closeTimer = this.hp.timers.setTimeout(() => {
+      this.ending = true;
+      this.destroy();
+    }, this.hp.closeDelay);
   }
 
   setNoDelay() {}
@@ -145,6 +153,14 @@ export function fakeIdm({ timers, values = defaultValues(), unitId = 1 } = {}) {
     /** Writes applied even when their connection closed before the answer. */
     applyClosedWrites: false,
     badEcho: false,
+    /** Graceful closes (FIN) received, how long the heat pump takes to close its side, destroys. */
+    ends: 0,
+    closeDelay: 0,
+    clientDestroys: 0,
+    /** When each connection was asked (clock of the timers' owner, set by the test). */
+    connectAt: [],
+    now: undefined,
+    timers,
     /** One client at a time (a second connection is refused), answers with a wrong transaction or unit id. */
     singleClient: false,
     wrongTransaction: false,
@@ -240,6 +256,7 @@ export function fakeIdm({ timers, values = defaultValues(), unitId = 1 } = {}) {
     connect() {
       const socket = new FakeSocket(hp);
       hp.connections += 1;
+      if (hp.now) hp.connectAt.push(hp.now());
       timers.setTimeout(() => {
         if (socket.destroyed) return;
         if (hp.down || (hp.singleClient && hp.open.size > 0)) {

@@ -299,6 +299,8 @@ export const TIMINGS = {
   stopReasserts: 3,
   /** A stop guard is checked this often (read, then written again if needed), whatever the interval. */
   stopRetry: 15 * SECOND,
+  /** A check that gave its turn up to a click or a command is tried again this soon. */
+  checkYield: SECOND,
   /** A stop sent again by a read leaves at least this long after the read closed the line. */
   reassertDelay: SECOND,
   /** Last values older than this are never sent again to Gladys (connected, device created). */

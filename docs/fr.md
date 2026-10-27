@@ -97,7 +97,7 @@ Un arrêt non confirmé est gardé dans `/data` (avec la valeur d’avant) penda
 3 minutes, quel que soit l’intervalle de rafraîchissement, l’intégration vérifie la pompe à chaleur
 toutes les 15 s : un arrêt qui n’a pas pu partir est retenté à chaque vérification ; un arrêt écrit mais
 pas encore visible est renvoyé (3 fois au plus, 20 s au moins après l’envoi) tant que la pompe à
-chaleur montre encore la valeur d’avant. Après un redémarrage, la vérification part aussitôt, avant
+chaleur montre encore la valeur d’avant. Une vérification n’interrompt jamais une commande : elle attend derrière les commandes (plus récentes qu’elle) et n’écrit jamais par-dessus ; un nouveau clic sur un arrêt interrompt une vérification et est toujours écrit puis relu. Après un redémarrage, la vérification part aussitôt, avant
 même de lire la configuration. Chaque arrêt et chaque renvoi est une écriture dans l’EEPROM du
 NAVIGATOR (quatre au plus par clic) ; les arrêts ne sont jamais limités par le quota horaire des
 commandes.

@@ -90,7 +90,7 @@ A stop not confirmed is kept in `/data` (with the value of before) for 3 minutes
 minutes, whatever the refresh interval, the integration checks the heat pump every 15 s: a stop that
 could not leave is tried again at each check; a stop written but not shown yet is sent again (three
 times at most, at least 20 s after it was sent) while the heat pump still shows the value of before.
-After a restart, the check runs at once, before even reading the configuration. Each stop and each
+A check never interrupts a command: it waits behind the commands (newer than it) and never writes over them; a new click on a stop interrupts a check and is always written and read back. After a restart, the check runs at once, before even reading the configuration. Each stop and each
 resend is a write in the NAVIGATOR's EEPROM (four at most per click); stops are never limited by the
 hourly quota of the commands.
 

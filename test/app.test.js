@@ -663,3 +663,140 @@ for (const flag of ['wrongTransaction', 'wrongUnit']) {
     assert.equal(ctx.gladys.fake.connectionStatus.connected, false);
   });
 }
+
+// --- Review r2 -------------------------------------------------------------------
+
+/** Advances until `cond()` holds (10 ms steps), at most `max` ms. */
+async function until(ctx, cond, max = 60 * SECOND) {
+  for (let e = 0; e < max && !cond(); e += 10) await ctx.advance(10, 10);
+  assert.ok(cond(), 'condition reached');
+}
+
+const checkRunning = (ctx, register) =>
+  ctx.app.checking === register && ctx.app.active?.kind === 'check';
+
+for (const kase of ['panel value', 'resends used up']) {
+  test(`r2-1 a click during a running check is written and read back (${kase})`, async (t) => {
+    const ctx = await setup();
+    t.after(ctx.stop);
+    ctx.hp.ignoreWrites = true;
+    await ctx.press('system-mode', 'standby');
+    if (kase === 'panel value') ctx.hp.set(1005, 4);
+    else ctx.app.stopGuards.get(1005).reasserts = 3;
+    ctx.hp.delay = 1000;
+    await until(ctx, () => checkRunning(ctx, 1005));
+    ctx.hp.ignoreWrites = false;
+    const from = ctx.hp.log.length;
+    const ack = ctx.fire('system-mode', 'standby');
+    await ctx.advance(4 * SECOND, 20);
+    assert.equal((await ack).success, true, String((await ack).error));
+    const after = ctx.hp.log.slice(from);
+    assert.ok(
+      after.some((r) => r.fc === 16 && r.address === 1005),
+      'written',
+    );
+    assert.ok(
+      after.some((r) => r.fc === 4 && r.address === 1005),
+      'read back',
+    );
+    assert.equal(ctx.hp.get(1005), 0);
+  });
+}
+
+test('r2-2 a check never interrupts a newer command, nor sends the stop over it', async (t) => {
+  const ctx = await setup({ config: ALLOW });
+  t.after(ctx.stop);
+  ctx.hp.ignoreWrites = true;
+  await ctx.press('system-mode', 'standby');
+  ctx.hp.ignoreWrites = false;
+  ctx.hp.delay = 900;
+  // The command arrives 1 s before the next check (15 s after the stop).
+  await ctx.advance(9 * SECOND, 50);
+  const ack = ctx.fire('system-mode', 'automatic');
+  await ctx.advance(6 * SECOND, 50);
+  assert.equal((await ack).success, true, String((await ack).error));
+  await ctx.advance(3 * MINUTE, 500);
+  assert.deepEqual(
+    writesTo(ctx.hp, 1005).map((w) => w.words[0]),
+    [0, 1],
+  );
+  assert.equal(ctx.hp.get(1005), 1);
+});
+
+test('r2-3 a click never waits behind the check of another stop', async (t) => {
+  const ctx = await setup();
+  t.after(ctx.stop);
+  ctx.hp.ignoreWrites = true;
+  await ctx.press('circuit-a-mode', 'off');
+  ctx.hp.ignoreWrites = false;
+  ctx.hp.delay = 1400;
+  await until(ctx, () => checkRunning(ctx, 1393));
+  const from = ctx.hp.log.length;
+  const ack = ctx.fire('system-mode', 'standby');
+  await ctx.advance(100, 10);
+  assert.ok(
+    ctx.hp.log.slice(from).some((r) => r.fc === 16 && r.address === 1005),
+    'written at once',
+  );
+  await ctx.advance(4 * SECOND, 50);
+  assert.equal((await ack).success, true, String((await ack).error));
+});
+
+test('r2-4 a stop ends a session still closing at once', async (t) => {
+  const ctx = await setup();
+  t.after(ctx.stop);
+  ctx.hp.closeDelay = 2000;
+  const ends = ctx.hp.ends;
+  ctx.app.tick();
+  await until(ctx, () => ctx.hp.ends > ends);
+  const from = ctx.hp.log.length;
+  ctx.fire('system-mode', 'standby');
+  await ctx.advance(100, 10);
+  assert.ok(ctx.hp.log.slice(from).some((r) => r.fc === 16 && r.address === 1005));
+  assert.equal(ctx.hp.maxOpen, 1);
+});
+
+test('r2-5 a stop not applied is sent again only 20 s after it was written', async (t) => {
+  const ctx = await setup();
+  t.after(ctx.stop);
+  ctx.hp.ignoreWrites = true;
+  ctx.fire('system-mode', 'standby');
+  await ctx.advance(29 * SECOND, 100);
+  assert.equal(writesTo(ctx.hp, 1005).length, 1, 'not at the 15 s check');
+  await ctx.advance(6 * SECOND, 100);
+  assert.equal(writesTo(ctx.hp, 1005).length, 2, 'at the 30 s check');
+});
+
+test('r2-5 sessions end gracefully (FIN, then the heat pump closes)', async (t) => {
+  const ctx = await setup();
+  t.after(ctx.stop);
+  assert.ok(ctx.hp.ends > 0);
+  assert.equal(ctx.hp.clientDestroys, 0);
+});
+
+test('r2-5 a stop is answered at 3.5 s on a heat pump that answers late', async (t) => {
+  const ctx = await setup();
+  t.after(ctx.stop);
+  // Written at 1.9 s, read back at 3.8 s: the answer cannot wait for it.
+  ctx.hp.delay = 1900;
+  const start = ctx.clock.elapsed;
+  let at;
+  ctx.fire('system-mode', 'standby').then(() => {
+    at = ctx.clock.elapsed - start;
+  });
+  await until(ctx, () => at !== undefined, 10 * SECOND);
+  assert.ok(at >= 3400 && at <= 3600, `${at} ms`);
+});
+
+test('r2-5 a stop is tried for 3 s, not longer', async (t) => {
+  const ctx = await setup({ config: { host: HOST, poll_interval: 3600 } });
+  t.after(ctx.stop);
+  ctx.hp.now = () => ctx.clock.elapsed;
+  ctx.hp.down = true;
+  const start = ctx.clock.elapsed;
+  ctx.fire('system-mode', 'standby');
+  await ctx.advance(10 * SECOND, 50);
+  const tries = ctx.hp.connectAt.map((x) => x - start).filter((x) => x < 10 * SECOND);
+  assert.ok(tries.length >= 5, `${tries.length} tries`);
+  assert.ok(Math.max(...tries) >= 2500 && Math.max(...tries) <= 3000, `${tries.at(-1)} ms`);
+});

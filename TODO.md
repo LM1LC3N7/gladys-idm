@@ -29,7 +29,13 @@ to date at the end of every milestone.
       -1.0 rule documented (7), stops out of the EEPROM quota, documented (8), hot water
       slider at the configured ceiling (9), /data guard beyond 3 min invalid (10). Tests
       named `r1-…`.
-- [ ] **Review r2**.
+- [x] **Review r2** (REFUSÉ, 2026-10-27): fixed in "Fix review r2": a click is
+      never resolved by a check (own job, written and read back) (1); a check
+      never ends a command and gives way to newer commands (2); a click ends a
+      running check and passes waiting ones (3); `abort()` destroys a session
+      still closing (4); tests for the 20 s delay, the graceful close, the
+      3.5 s answer and the 3 s budget (5); TODO.md (6). Tests named `r2-…`.
+- [ ] **Review r3** (last).
 - [ ] **Milestone 2 — real heat pump**: run against a real NAVIGATOR 2.0 (see "To check").
 - [ ] **Milestone 3 — more**: thermal energy (1748-1762, kWh, as non-index
       sensors), eco room setpoint (1415+), PV surplus write (74, cyclic,
@@ -87,13 +93,23 @@ to date at the end of every milestone.
   hot water 35 °C (iDM minimum) to min(ceiling, 60 °C), whole degrees.
   `text/select`, `water-heater/target-temperature`,
   `thermostat/target-temperature`: never a switch.
-- **Stops**: 1005 = 0 (standby) and 1393+i = 0 (circuit off). Not confirmed:
-  guard of 3 min in /data (target, register, end, resends), resent by reads
-  started 20 s or more after it (the NAVIGATOR applies a change in ~15 s) while
-  the value read is the one before the stop (or unknown); a third value
-  (someone at the panel) or a newer command that left ends it; at a restart,
-  `boot()` resends before the configuration is read. Before the configuration
-  is read, a stop goes to the heat pump of the last read (kept in /data).
+- **Stops**: 1005 = 0 (standby) and 1393+i = 0 (circuit off). A click is
+  its own job, always written then read back (success only on that read
+  back), queued before everything, ending any read, command or check on the
+  line (a check is done again at its next turn); clicks join only a click of
+  the same register still waiting. Not confirmed: guard of 3 min in /data
+  (target, register, end, resends, written, value of before). Checks every
+  15 s, whatever the interval (`runCheck`): read the register, then
+  `decideStop`: done when the stop shows (a sticky guard runs to its end),
+  dropped on a third value (someone at the panel), sent again (three times
+  at most, 20 s after the last write; a stop never written at every check)
+  while the value of before shows (the first value read when unknown). A
+  check never ends another session, gives its turn up to a click or a
+  command waiting or running (they are newer), and checks that again right
+  before its write. A new click renews the guard (three resends again). At a
+  restart, `boot()` runs the check at once, before the configuration is
+  read. Before the configuration is read, a click goes to the heat pump of
+  the last read (kept in /data).
 - **EEPROM quota**: 6 writes per register and rolling hour (in memory, reset
   by a restart), never for a lower setpoint; stops neither count nor are
   limited (four writes at most per click: the stop and three resends).
@@ -103,12 +119,14 @@ to date at the end of every milestone.
   "never sooner" clamp of `schedule` (every caller already waits at least
   the interval or `firstWait`), `startedAt <= lastSentAt` (no write can run
   during a read with the line lock), the freshness test of `queueStates`
-  (the publisher drops values older than 2 min too), the `yieldTo` of the
-  command worker (`drain` gives the session up at once when a stop waits).
+  (the publisher drops values older than 2 min too), the `yieldTo` of
+  the command worker and `drain`'s check (a click ends the command session
+  itself: `queueStop` and `useLine('protect')` abort it), the `yieldTo` of
+  the reads (a click ends a read too).
   Layered checks; each
   behaviour has its test.
 - **Command queue** instead of "busy": a scene setting N values sets them all
-  in order on one session; a command waiting more than 4.3 s is answered
+  in order on one session; a command waiting more than 3.5 s is answered
   "waiting" and starts within 15 s of its arrival or never.
 - **Identity**: no serial or version register over Modbus: the device id is
   the integration's; another device at the same address is not detected
