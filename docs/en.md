@@ -1,61 +1,113 @@
-# Demo Devices Template
+# iDM heat pump (NAVIGATOR 2.0)
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+This integration shows your iDM heat pump with the **NAVIGATOR 2.0** controller in Gladys, through
+its **Modbus TCP** interface on your local network, without any cloud. If you allow it, it can also
+change the modes and setpoints.
 
-## What you get
+> **Never tested with a real device.** The integration follows iDM's Modbus TCP documentation and the
+> Home Assistant integration `hacs-idm-heatpump`, and was tested against a simulated heat pump only.
+> Not affiliated with iDM Energiesysteme GmbH.
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+## What you need
+
+- An iDM heat pump with the **NAVIGATOR 2.0** controller (the NAVIGATOR 1.0 and 1.7 have another
+  Modbus table: they are not supported).
+- **Modbus TCP enabled**: "Settings" → "Building management" → "Modbus TCP" set to "On". This setting
+  is at installer level: ask your installer or iDM service. The web interface of the heat pump alone
+  is not enough.
+- A fixed IP address for the heat pump (reserve it in your router or set it in the network menu of
+  the NAVIGATOR).
+- Modbus TCP has **no password**: any device on your network can read and write the settings of the
+  heat pump. Keep it on a **trusted network**, never exposed to the Internet.
 
 ## Configuration
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+| Field                       | Role                                                                             |
+| --------------------------- | -------------------------------------------------------------------------------- |
+| IP address of the heat pump | IPv4 or host name, port 502 unless you add one (`192.168.1.60:502`).             |
+| Modbus unit id              | 1 on a NAVIGATOR.                                                                |
+| Heating circuits            | The letters of your circuits, A to G, separated by commas (`A` by default).      |
+| Allow the commands          | Off by default (see below).                                                      |
+| Hot water ceiling (°C)      | The highest hot water setpoint Gladys may send: 55 °C by default, 60 °C at most. |
+| Refresh interval            | 60 s by default, 30 s to 1 h.                                                    |
+| Language                    | Language of the device names, the status and the messages.                       |
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+Save, then add the heat pump from the **Discovery** tab. The "Test the connection" button reads the
+heat pump again, never more often than the interval.
 
-## Actions
+## What you see
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+- Operating mode (standby, automatic, away, holiday, hot water only, heating/cooling only) and heat
+  pump state (standby, heating, cooling, hot water, defrost).
+- Fault (heat pump locked), compressor running, charge pump running.
+- Temperatures: outdoor and average outdoor, heat pump flow and return, heat source inlet and outlet,
+  air intake, buffer tank, hot water (top, bottom, tap), hot water setpoint.
+- For each configured circuit: mode, current state (off, heating, cooling), "normal" room setpoint,
+  room, flow and flow target temperatures.
+- When the heat pump gives them: humidity, electrical power (kW), solar temperatures (collector,
+  collector return, charge).
 
-## Scenes
+A feature shows once a value of it was read. The special values of the NAVIGATOR are never published
+as measures: -1.0 on a temperature (sensor absent, except the outdoor temperature and the heat pump
+flow/return, always fitted), "not available" on a mode, -1 on the charge pump (published as "off"),
+a value out of range. Thermal energy (kWh) is not published.
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+## The commands
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+Off by default. With "Allow the commands", Gladys may change:
 
-## Dashboard
+- the operating mode (automatic, away, hot water only, heating/cooling only; "holiday" is shown
+  only);
+- the mode of a configured circuit (time program, normal, eco, manual heating, manual cooling);
+- the "normal" room setpoint of a circuit, 15 to 30 °C by 0.5 °C;
+- the hot water setpoint, in whole degrees, from 35 °C to the ceiling of the configuration (55 °C by
+  default). **Nothing above 60 °C is ever sent**, whatever is typed.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+Each command first reads the current value on the heat pump, writes nothing when it is already right,
+then reads the written value back: it succeeds only when the read back shows the value asked.
+Otherwise Gladys answers "sent, without confirmation" and reads the heat pump 5 s, 25 s and 60 s
+after (the NAVIGATOR applies a change in about 15 s).
 
-## Troubleshooting
+A command is refused, nothing sent, when: the option is off (also checked right before the write),
+the value is out of range or above the ceiling, the circuit is not in the configuration, the current
+value could not be read, the configuration changed meanwhile, a stop was sent after it arrived, 16
+commands are already waiting, or this setting was already changed 6 times in the last hour. That last
+limit protects the NAVIGATOR, which keeps these settings in a memory with limited write cycles
+(300,000 according to iDM); it never applies to a lower setpoint nor to a stop.
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+The commands go one at a time, in their order of arrival, on one connection. A scene setting several
+values sets them all: a command still waiting its turn after 4 s gets the answer "waiting" and goes
+within 15 s of the click, or not at all.
+
+## The stops
+
+Setting the operating mode to **Standby** or a circuit to **Off** **never** depends on the commands
+option, the bounds, a read in progress or failing, a heat pump not read yet, nor a waiting command. A
+stop goes before anything; every command that arrived before it and has not left is dropped. A refused
+connection is tried again every 250 ms for 3.5 s.
+
+A stop not confirmed is kept in `/data` for 3 minutes: the next reads send it again (three times at
+most, at least 20 s after it was sent) while the heat pump still shows the value of before, and a
+restart of the integration sends it again at once, before even reading the configuration.
+
+A stop can fail or not be sent again in these cases:
+
+- no valid address in the configuration (or, before the configuration is read, no heat pump read
+  before): refused, nothing sent;
+- the heat pump stays unreachable for 3.5 s: "not sent", then sent again by the next reads and at a
+  restart while the 3-minute guard runs;
+- the heat pump answers a Modbus exception: "refused" or "sent, without confirmation" depending on the
+  code;
+- the read back does not show the stop yet: "sent, without confirmation";
+- it is no longer sent again once someone set another value on the heat pump meanwhile, once a newer
+  Gladys command for the same setting left, after 3 resends or after 3 minutes.
+
+Gladys never starts the heat pump again by itself.
+
+## Known limits
+
+- No serial number over Modbus: the device is tied to the integration, not to the IP address
+  (changing the address keeps the device and its history), and another Modbus device at the same
+  address would not be detected.
+- Writing the photovoltaic surplus, the room-by-room zones, cascades, boosters and thermal energy are
+  not supported yet.
