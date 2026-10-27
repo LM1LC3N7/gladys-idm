@@ -78,9 +78,16 @@ export class ModbusSession {
     this.dead = undefined;
     // Starts anywhere: a late answer of an older session never matches by chance.
     this.transaction = Math.floor(Math.random() * 0x10000);
+    /** Resolves once the socket is closed (the next connection opens only after it). */
+    this.closed = new Promise((resolve) => {
+      this.markClosed = resolve;
+    });
     socket.on('data', (chunk) => this.onData(chunk));
     socket.on('error', () => this.fail(new ModbusError(ERROR_KINDS.CLOSED, 'socket error')));
-    socket.on('close', () => this.fail(new ModbusError(ERROR_KINDS.CLOSED, 'connection closed')));
+    socket.on('close', () => {
+      this.markClosed();
+      this.fail(new ModbusError(ERROR_KINDS.CLOSED, 'connection closed'));
+    });
   }
 
   /** The size of the frame being received, once its header is in (else undefined). */
@@ -177,8 +184,33 @@ export class ModbusSession {
     this.fail(new ModbusError(ERROR_KINDS.ABORTED, message));
   }
 
+  /**
+   * Ends the session gracefully: a FIN, then the heat pump closes its side
+   * (a controller that accepts one client at a time has then let it go
+   * before the next connection); 500 ms at most, then the socket is
+   * destroyed. Resolves once closed.
+   */
   close() {
-    this.fail(new ModbusError(ERROR_KINDS.ABORTED, 'session closed'));
+    if (!this.dead && !this.pending) {
+      this.dead = new ModbusError(ERROR_KINDS.ABORTED, 'session closed');
+      const timer = this.timers.setTimeout(() => this.socket.destroy(), TIMINGS.closeWait);
+      this.closed.then(() => this.timers.clearTimeout(timer));
+      try {
+        this.socket.end();
+      } catch {
+        this.socket.destroy();
+      }
+    } else {
+      this.fail(new ModbusError(ERROR_KINDS.ABORTED, 'session closed'));
+    }
+    // Bounded: a socket that never says 'close' does not hold the line.
+    let guard;
+    return Promise.race([
+      this.closed,
+      new Promise((resolve) => {
+        guard = this.timers.setTimeout(resolve, TIMINGS.closeWait * 2);
+      }),
+    ]).finally(() => this.timers.clearTimeout(guard));
   }
 
   /**

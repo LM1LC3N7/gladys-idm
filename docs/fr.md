@@ -54,7 +54,7 @@ Une fonctionnalité n’apparaît qu’une fois qu’une valeur en a été lue. 
 NAVIGATOR ne sont jamais publiées comme des mesures : -1,0 sur une température (capteur absent, sauf
 la température extérieure et le départ/retour de la pompe à chaleur, toujours présents), « non
 disponible » sur un mode, -1 sur la pompe de charge (publié comme « arrêtée »), une valeur hors plage.
-L’énergie thermique (kWh) n’est pas publiée.
+Conséquence : sur les capteurs optionnels (air aspiré, entrée et sortie de la source, ballon, eau chaude, solaire, circuits), une vraie température d’exactement -1,0 °C n’est pas publiée et Gladys garde la valeur précédente jusqu’à la lecture suivante. L’énergie thermique (kWh) n’est pas publiée.
 
 ## Les commandes
 
@@ -82,7 +82,7 @@ réglages dans une mémoire à nombre d’écritures limité (300 000 selon iDM)
 une baisse de consigne ni à un arrêt.
 
 Les commandes passent une par une, dans leur ordre d’arrivée, sur une seule connexion. Une scène qui
-règle plusieurs valeurs les règle toutes : une commande qui attend son tour au-delà de 4 s reçoit la
+règle plusieurs valeurs les règle toutes : une commande qui attend son tour au-delà de 3,5 s reçoit la
 réponse « en attente » et part dans les 15 s qui suivent le clic, ou pas du tout.
 
 ## Les arrêts
@@ -91,24 +91,35 @@ Mettre le mode de fonctionnement sur **Veille** ou un circuit sur **Arrêt** ne 
 l’option des commandes, ni des limites, ni d’une lecture en cours ou en échec, ni d’une pompe à chaleur
 pas encore lue, ni d’une commande en attente. Un arrêt passe devant tout ; toutes les commandes
 arrivées avant lui et pas encore parties sont abandonnées. Une connexion refusée est réessayée toutes
-les 250 ms pendant 3,5 s.
+les 250 ms pendant 3 s ; Gladys a sa réponse en 3,5 s au plus.
 
-Un arrêt non confirmé est gardé dans `/data` pendant 3 minutes : les lectures suivantes le renvoient
-(3 fois au plus, 20 s au moins après l’envoi) tant que la pompe à chaleur montre encore la valeur
-d’avant, et un redémarrage de l’intégration le renvoie aussitôt, avant même de lire la configuration.
+Un arrêt non confirmé est gardé dans `/data` (avec la valeur d’avant) pendant 3 minutes. Pendant ces
+3 minutes, quel que soit l’intervalle de rafraîchissement, l’intégration vérifie la pompe à chaleur
+toutes les 15 s : un arrêt qui n’a pas pu partir est retenté à chaque vérification ; un arrêt écrit mais
+pas encore visible est renvoyé (3 fois au plus, 20 s au moins après l’envoi) tant que la pompe à
+chaleur montre encore la valeur d’avant. Après un redémarrage, la vérification part aussitôt, avant
+même de lire la configuration. Chaque arrêt et chaque renvoi est une écriture dans l’EEPROM du
+NAVIGATOR (quatre au plus par clic) ; les arrêts ne sont jamais limités par le quota horaire des
+commandes.
 
 Un arrêt peut échouer ou ne pas être renvoyé dans ces cas :
 
 - aucune adresse valide dans la configuration (ou, avant que la configuration soit lue, aucune pompe à
   chaleur lue auparavant) : refusé, rien n’est envoyé ;
-- la pompe à chaleur reste injoignable pendant 3,5 s : « non envoyé », puis renvoyé par les lectures
-  suivantes et au redémarrage tant que la garde de 3 minutes court ;
+- la pompe à chaleur reste injoignable pendant 3 s : « non envoyé », puis retenté toutes les 15 s (et
+  au redémarrage) tant que la garde de 3 minutes court ;
 - la pompe à chaleur répond une exception Modbus : « refusée » ou « envoyée, sans confirmation » selon
   le code ;
 - la relecture ne montre pas encore l’arrêt : « envoyée, sans confirmation » ;
-- il n’est plus renvoyé quand quelqu’un a mis une autre valeur sur la pompe à chaleur entre-temps, quand
-  une commande plus récente de Gladys pour le même réglage est partie, après 3 renvois ou après
-  3 minutes.
+- il n’est plus renvoyé quand quelqu’un a mis une autre valeur sur la pompe à chaleur entre-temps (la
+  valeur d’avant est gardée dans `/data` ; pour un arrêt cliqué avant toute lecture, c’est la première
+  valeur relue après lui), quand une commande plus récente de Gladys pour le même réglage est partie,
+  après 3 renvois ou après 3 minutes ;
+- `/data` contient une garde qui finirait dans plus de 3 minutes (horloge revenue en arrière, sur un
+  appareil sans horloge temps réel) : la garde est invalide et n’est pas rejouée. Une horloge revenue
+  moins loin en arrière ne se distingue pas d’un arrêt récent : après une coupure sur un tel appareil,
+  un arrêt plus ancien peut être revérifié au démarrage (renvoyé seulement si la pompe à chaleur montre
+  la valeur d’avant lui).
 
 Gladys ne remet jamais la pompe à chaleur en marche toute seule.
 

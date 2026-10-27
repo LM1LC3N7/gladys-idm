@@ -20,7 +20,16 @@ to date at the end of every milestone.
       again, EEPROM quota, test button, docs en/fr, cover. Tested against a
       fake NAVIGATOR only (virtual clock, and a real-clock test x20 on a
       local TCP server).
-- [ ] **Review r1** (xhigh: heating and hot water commands).
+- [x] **Review r1** (xhigh, REFUSÉ, 2026-10-27): fixed in "Fix review r1": one line lock
+      (a stop and a command in the same turn: one connection, the stop first; a session
+      closed gracefully before the next one opens) (1); stop guards checked every 15 s
+      for 3 min whatever the interval, unsent stops tried again (2); the value before a
+      stop kept in /data, the first value read after it when unknown (3); pending states
+      dated, dropped after 2 min (4); tests for the uncovered points (5); ack 3.5 s (6),
+      -1.0 rule documented (7), stops out of the EEPROM quota, documented (8), hot water
+      slider at the configured ceiling (9), /data guard beyond 3 min invalid (10). Tests
+      named `r1-…`.
+- [ ] **Review r2**.
 - [ ] **Milestone 2 — real heat pump**: run against a real NAVIGATOR 2.0 (see "To check").
 - [ ] **Milestone 3 — more**: thermal energy (1748-1762, kWh, as non-index
       sensors), eco room setpoint (1415+), PV surplus write (74, cyclic,
@@ -86,7 +95,18 @@ to date at the end of every milestone.
   `boot()` resends before the configuration is read. Before the configuration
   is read, a stop goes to the heat pump of the last read (kept in /data).
 - **EEPROM quota**: 6 writes per register and rolling hour (in memory, reset
-  by a restart), never for a lower setpoint nor a stop (iDM: 300,000 cycles).
+  by a restart), never for a lower setpoint; stops neither count nor are
+  limited (four writes at most per click: the stop and three resends).
+- **Mutants left alive on purpose (r1)**: `checkDhw` "> top" (the config
+  ceiling, ≤ 60, catches the same), the option in `beforeSend` (checked
+  synchronously just before, after the fresh read: no window), the
+  "never sooner" clamp of `schedule` (every caller already waits at least
+  the interval or `firstWait`), `startedAt <= lastSentAt` (no write can run
+  during a read with the line lock), the freshness test of `queueStates`
+  (the publisher drops values older than 2 min too), the `yieldTo` of the
+  command worker (`drain` gives the session up at once when a stop waits).
+  Layered checks; each
+  behaviour has its test.
 - **Command queue** instead of "busy": a scene setting N values sets them all
   in order on one session; a command waiting more than 4.3 s is answered
   "waiting" and starts within 15 s of its arrival or never.

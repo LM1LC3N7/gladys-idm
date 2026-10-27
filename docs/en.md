@@ -50,7 +50,7 @@ heat pump again, never more often than the interval.
 A feature shows once a value of it was read. The special values of the NAVIGATOR are never published
 as measures: -1.0 on a temperature (sensor absent, except the outdoor temperature and the heat pump
 flow/return, always fitted), "not available" on a mode, -1 on the charge pump (published as "off"),
-a value out of range. Thermal energy (kWh) is not published.
+a value out of range. As a consequence, on the optional sensors (air intake, source inlet and outlet, buffer, hot water, solar, circuits), a real temperature of exactly -1.0 °C is not published and Gladys keeps the previous value until the next read. Thermal energy (kWh) is not published.
 
 ## The commands
 
@@ -76,7 +76,7 @@ limit protects the NAVIGATOR, which keeps these settings in a memory with limite
 (300,000 according to iDM); it never applies to a lower setpoint nor to a stop.
 
 The commands go one at a time, in their order of arrival, on one connection. A scene setting several
-values sets them all: a command still waiting its turn after 4 s gets the answer "waiting" and goes
+values sets them all: a command still waiting its turn after 3.5 s gets the answer "waiting" and goes
 within 15 s of the click, or not at all.
 
 ## The stops
@@ -84,23 +84,32 @@ within 15 s of the click, or not at all.
 Setting the operating mode to **Standby** or a circuit to **Off** **never** depends on the commands
 option, the bounds, a read in progress or failing, a heat pump not read yet, nor a waiting command. A
 stop goes before anything; every command that arrived before it and has not left is dropped. A refused
-connection is tried again every 250 ms for 3.5 s.
+connection is tried again every 250 ms for 3 s; Gladys gets its answer within 3.5 s.
 
-A stop not confirmed is kept in `/data` for 3 minutes: the next reads send it again (three times at
-most, at least 20 s after it was sent) while the heat pump still shows the value of before, and a
-restart of the integration sends it again at once, before even reading the configuration.
+A stop not confirmed is kept in `/data` (with the value of before) for 3 minutes. During those 3
+minutes, whatever the refresh interval, the integration checks the heat pump every 15 s: a stop that
+could not leave is tried again at each check; a stop written but not shown yet is sent again (three
+times at most, at least 20 s after it was sent) while the heat pump still shows the value of before.
+After a restart, the check runs at once, before even reading the configuration. Each stop and each
+resend is a write in the NAVIGATOR's EEPROM (four at most per click); stops are never limited by the
+hourly quota of the commands.
 
 A stop can fail or not be sent again in these cases:
 
 - no valid address in the configuration (or, before the configuration is read, no heat pump read
   before): refused, nothing sent;
-- the heat pump stays unreachable for 3.5 s: "not sent", then sent again by the next reads and at a
-  restart while the 3-minute guard runs;
+- the heat pump stays unreachable for 3 s: "not sent", then tried again every 15 s (and at a
+  restart) while the 3-minute guard runs;
 - the heat pump answers a Modbus exception: "refused" or "sent, without confirmation" depending on the
   code;
 - the read back does not show the stop yet: "sent, without confirmation";
-- it is no longer sent again once someone set another value on the heat pump meanwhile, once a newer
-  Gladys command for the same setting left, after 3 resends or after 3 minutes.
+- it is no longer sent again once someone set another value on the heat pump meanwhile (the value of
+  before is kept in `/data`; for a stop clicked before any read, the first value read after it), once
+  a newer Gladys command for the same setting left, after 3 resends or after 3 minutes;
+- `/data` holding a guard that would end more than 3 minutes from now (a clock set back, on a device
+  without a real-time clock): the guard is invalid and not replayed. A clock set back by less than
+  that cannot be told from a recent stop: after a power cut on such a device, an older stop may be
+  checked again at boot (sent again only while the heat pump shows the value of before it).
 
 Gladys never starts the heat pump again by itself.
 

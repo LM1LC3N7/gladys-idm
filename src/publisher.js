@@ -5,7 +5,9 @@
 // again every 30 min. One send at a time (concurrent flushes join it), and the
 // room of a batch is taken from the budget BEFORE it is sent, so two
 // publications at once never exceed it. Whatever is left over (budget spent,
-// Gladys unreachable) waits for the next flush, every second. Never energy.
+// Gladys unreachable) waits for the next flush, every second, but never
+// longer than TIMINGS.freshFor after the value was read: an older value is
+// dropped, never published as new (Gladys back after an outage). Never energy.
 // -----------------------------------------------------------------------------
 
 import { LIMITS, MINUTE, TIMINGS } from './constants.js';
@@ -16,7 +18,7 @@ export class StatePublisher {
     this.logger = logger;
     this.now = now;
     this.timers = timers;
-    /** featureId -> { state } | { text } */
+    /** featureId -> { value: { state } | { text }, at: when it was read (monotonic) } */
     this.pending = new Map();
     /** The times of the states counted in the last minute. */
     this.window = [];
@@ -38,8 +40,8 @@ export class StatePublisher {
     }
   }
 
-  push(featureId, value) {
-    this.pending.set(featureId, value);
+  push(featureId, value, at = this.now()) {
+    this.pending.set(featureId, { value, at });
   }
 
   /** Forgets what is pending for a deleted device and its features. */
@@ -67,13 +69,20 @@ export class StatePublisher {
     if (room <= 0 || this.pending.size === 0) {
       return;
     }
+    for (const [featureId, entry] of [...this.pending]) {
+      if (now - entry.at > TIMINGS.freshFor) {
+        this.pending.delete(featureId);
+      }
+    }
     const batch = [];
-    for (const [featureId, value] of this.pending) {
+    const kept = new Map();
+    for (const [featureId, entry] of this.pending) {
       if (batch.length >= room) {
         break;
       }
       this.pending.delete(featureId);
-      batch.push({ device_feature_external_id: featureId, ...value });
+      kept.set(featureId, entry);
+      batch.push({ device_feature_external_id: featureId, ...entry.value });
     }
     // Reserved now: the whole batch counts, whatever Gladys answers.
     for (let i = 0; i < batch.length; i += 1) {
@@ -83,9 +92,9 @@ export class StatePublisher {
       await this.gladys.publishChangedStates(batch, { heartbeat: TIMINGS.stateHeartbeat });
     } catch (err) {
       // Kept for the next round, unless a newer value arrived meanwhile.
-      for (const { device_feature_external_id: id, ...value } of batch) {
+      for (const [id, entry] of kept) {
         if (!this.pending.has(id)) {
-          this.pending.set(id, value);
+          this.pending.set(id, entry);
         }
       }
       throw err;

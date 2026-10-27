@@ -96,15 +96,27 @@ function normalizeStop(raw, now) {
   if (!host || !/^[a-z0-9.-]+$/.test(host) || !port || !unitId || !STOP_REGISTERS.has(register)) {
     return undefined;
   }
-  // A time in the future beyond the longest guard (a clock set back) is cut down.
-  if (!Number.isFinite(raw.until) || raw.until <= now) return undefined;
+  // A guard ending beyond its longest duration from now: the clock was set
+  // back (or the file is not ours): invalid, never replayed.
+  if (
+    !Number.isFinite(raw.until) ||
+    raw.until <= now ||
+    raw.until > now + TIMINGS.stopGuard + 1000
+  ) {
+    return undefined;
+  }
   return {
     host,
     port,
     unitId,
     register,
     value: STOP_REGISTERS.get(register),
-    until: Math.min(raw.until, now + TIMINGS.stopGuard),
+    until: raw.until,
+    written: raw.written === true,
+    // The values read before the stop (modes): another one read later was set on the heat pump.
+    before: Array.isArray(raw.before)
+      ? raw.before.filter((v) => typeof v === 'string' && /^[a-z-]{1,24}$/.test(v)).slice(0, 2)
+      : [],
     reasserts: Number.isInteger(raw.reasserts)
       ? Math.min(TIMINGS.stopReasserts, Math.max(0, raw.reasserts))
       : 0,

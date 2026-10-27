@@ -255,7 +255,7 @@ export function rolesToBuild({ circuits, seen = new Set(), created = new Set() }
 }
 
 /** The Gladys device of the heat pump. */
-export function buildDevice(gladys, { language, roles }) {
+export function buildDevice(gladys, { language, roles, dhwCap = DHW_CAP.default }) {
   const i = ids(gladys);
   return {
     name: word(DEVICE_NAME, language),
@@ -269,6 +269,8 @@ export function buildDevice(gladys, { language, roles }) {
         name: nameOf(role, language),
         external_id: i.feature(role),
         ...entry.definition,
+        // The hot water slider stops at the ceiling of the configuration (60 °C at most).
+        ...(role === F.DHW_SETPOINT ? { max: Math.min(DHW_CAP.max, dhwCap) } : {}),
         ...(options
           ? {
               supported_options: Object.values(options[0]).map((value, index) => ({

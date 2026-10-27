@@ -16,7 +16,7 @@ const gladys = new GladysIntegration();
 const app = new IdmApp({ gladys });
 
 registerHandlers(gladys, app, logger);
-gladys.handleShutdown(() => app.stop());
+gladys.handleShutdown(() => app.shutdown());
 
 logger.info('Starting the iDM heat pump integration...');
 app.boot().catch((err) => logger.warn(`Stops kept in /data: ${err.message}`));

@@ -4,9 +4,12 @@
 //
 // Special values (lesson 17 of the earlier lots: never published as measures):
 //   - FLOAT -1.0: "not available" (sensor absent, circuit or solar not
-//     installed, iDM hacs-idm-heatpump and idm-heatpump-api alike), except on
-//     the outdoor and heat pump flow/return temperatures, always fitted, where
-//     -1.0 °C is a real temperature;
+//     installed: idm-heatpump-api's default FLOAT sentinel; hacs-idm-heatpump
+//     applies it to its non-negative values only), here on every optional
+//     temperature too, except the outdoor and heat pump flow/return
+//     temperatures, always fitted. A real -1.0 °C on an optional sensor is
+//     thus not published (said in the docs): an absent sensor would
+//     otherwise show -1 °C forever;
 //   - UCHAR 0xFFFF: "not available" (protocol.js already drops it);
 //   - WORD -1 on the charge pump: the pump is off (a state, not a speed).
 // A value outside its plausible range is unknown, never published.

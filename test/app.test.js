@@ -39,7 +39,7 @@ test('discovery: one device, the values read and published, special values left 
   assert.ok(!roles.includes('temperature-solar-collector'), 'no solar feature without solar');
   assert.ok(!roles.includes('humidity'), 'no humidity sensor');
   const dhw = device.features.find((f) => f.external_id === feature('dhw-setpoint'));
-  assert.equal(dhw.max, 60, 'hot water: 60 °C at most');
+  assert.equal(dhw.max, 55, 'hot water: the ceiling of the configuration (55 °C by default)');
   assert.equal(ctx.state('temperature-outdoor').state, 4.5);
   assert.equal(ctx.state('temperature-dhw-top').state, 48.3);
   assert.equal(ctx.state('dhw-setpoint').state, 48);
@@ -458,3 +458,208 @@ test('an answer longer than a Modbus frame ends the read before it is all receiv
     ctx.lines.join('\n'),
   );
 });
+
+// --- Review r1 -------------------------------------------------------------------
+
+const firstWriteAfter = (hp, from) => hp.log.slice(from).find((r) => r.fc === 16);
+
+for (const readInFlight of [false, true]) {
+  test(`r1-1 a command and a stop in the same turn (${readInFlight ? 'read in flight' : 'line idle'}): one connection, the stop first`, async (t) => {
+    const ctx = await setup({ config: ALLOW });
+    t.after(ctx.stop);
+    ctx.hp.delay = 30;
+    if (readInFlight) {
+      ctx.app.tick();
+      await ctx.advance(20, 5);
+    }
+    const from = ctx.hp.log.length;
+    const acks = [
+      ctx.fire('dhw-setpoint', 50),
+      ctx.fire('system-mode', 'standby'),
+      ctx.fire('dhw-setpoint', 52),
+    ];
+    await ctx.advance(6 * SECOND, 20);
+    const [before, stop, after] = await Promise.all(acks);
+    assert.equal(stop.success, true, String(stop.error));
+    assert.equal(ctx.hp.maxOpen, 1, 'never two connections');
+    assert.equal(firstWriteAfter(ctx.hp, from).address, 1005, 'the stop is written first');
+    assert.equal(before.success, false, 'the command before the stop is dropped');
+    assert.equal(after.success, true, String(after.error));
+    assert.equal(ctx.hp.get(1005), 0);
+    assert.equal(ctx.hp.get(1032), 52);
+  });
+}
+
+test('r1-1 a single-client slow heat pump: the stop goes within 3.5 s, before newer commands', async (t) => {
+  const ctx = await setup({ config: ALLOW });
+  t.after(ctx.stop);
+  ctx.hp.singleClient = true;
+  ctx.hp.delay = 900;
+  const from = ctx.hp.log.length;
+  const acks = [
+    ctx.fire('dhw-setpoint', 50),
+    ctx.fire('system-mode', 'standby'),
+    ctx.fire('dhw-setpoint', 52),
+    ctx.fire('circuit-a-setpoint', 21),
+  ];
+  await ctx.advance(3500, 20);
+  assert.equal(ctx.hp.get(1005), 0, 'stopped within 3.5 s');
+  assert.equal(firstWriteAfter(ctx.hp, from).address, 1005);
+  await ctx.advance(30 * SECOND, 50);
+  await Promise.all(acks);
+  assert.equal(ctx.hp.refused, 0, 'never a second connection');
+});
+
+for (const interval of [300, 3600]) {
+  test(`r1-2 a stop that could not leave is tried again within 20 s (interval ${interval} s)`, async (t) => {
+    const ctx = await setup({ config: { host: HOST, poll_interval: interval } });
+    t.after(ctx.stop);
+    ctx.hp.down = true;
+    const ack = ctx.fire('system-mode', 'standby');
+    await ctx.advance(5 * SECOND, 50);
+    assert.equal((await ack).success, false);
+    ctx.hp.down = false;
+    await ctx.advance(16 * SECOND, 100);
+    assert.equal(ctx.hp.get(1005), 0);
+    assert.equal(writesTo(ctx.hp, 1005).length, 1);
+  });
+
+  test(`r1-2 a stop written, not applied, is sent again by the checks (interval ${interval} s)`, async (t) => {
+    const ctx = await setup({ config: { host: HOST, poll_interval: interval } });
+    t.after(ctx.stop);
+    ctx.hp.ignoreWrites = true;
+    await ctx.press('circuit-a-mode', 'off');
+    await ctx.advance(40 * SECOND, 200);
+    assert.ok(writesTo(ctx.hp, 1393).length >= 2, 'sent again');
+    await ctx.advance(5 * MINUTE, 500);
+    assert.ok(writesTo(ctx.hp, 1393).length <= 4, 'three times at most');
+  });
+}
+
+test('r1-3 after a restart, a value set at the panel meanwhile is never overridden', async (t) => {
+  const clock = testClock({ start: NOW });
+  const hp = fakeIdm({ timers: clock.timers });
+  hp.set(1005, 4); // hot water only, set at the NAVIGATOR after the stop
+  const store = memoryStore({
+    lastAttemptAt: NOW - 10 * SECOND,
+    stops: [
+      {
+        host: HOST,
+        port: 502,
+        unitId: 1,
+        register: 1005,
+        until: NOW + MINUTE,
+        reasserts: 1,
+        written: true,
+        before: ['automatic'],
+      },
+    ],
+  });
+  const ctx = await setup({ clock, hp, store, boot: true, create: false });
+  t.after(ctx.stop);
+  await ctx.advance(2 * MINUTE, 500);
+  assert.deepEqual(writesTo(hp, 1005), []);
+  assert.deepEqual(store.data.stops, []);
+});
+
+test('r1-3 a stop clicked before any value is known: a later change at the panel ends it', async (t) => {
+  const clock = testClock({ start: NOW });
+  const hp = fakeIdm({ timers: clock.timers });
+  const store = memoryStore({
+    lastAttemptAt: NOW - 10 * SECOND,
+    stops: [
+      {
+        host: HOST,
+        port: 502,
+        unitId: 1,
+        register: 1005,
+        until: NOW + 2 * MINUTE,
+        reasserts: 0,
+        written: true,
+        before: [],
+      },
+    ],
+  });
+  hp.ignoreWrites = true;
+  const ctx = await setup({ clock, hp, store, boot: true, create: false });
+  t.after(ctx.stop);
+  assert.equal(writesTo(hp, 1005).length, 1, 'sent again at the start');
+  hp.set(1005, 4);
+  await ctx.advance(2 * MINUTE, 500);
+  assert.equal(writesTo(hp, 1005).length, 1, 'never over the panel');
+});
+
+test('r1-4 a value read while Gladys was unreachable is not published 10 minutes later', async (t) => {
+  const ctx = await setup({ config: { host: HOST, poll_interval: 600 } });
+  t.after(ctx.stop);
+  const publish = ctx.gladys.publishChangedStates.bind(ctx.gladys);
+  let down = true;
+  ctx.gladys.publishChangedStates = async (...args) => {
+    if (down) throw new Error('Gladys unreachable');
+    return publish(...args);
+  };
+  ctx.hp.set(1000, 12.3);
+  // Read at 10 min (the interval) while Gladys is unreachable; Gladys back at 13 min.
+  await ctx.advance(13 * MINUTE, 1000);
+  ctx.hp.down = true;
+  down = false;
+  await ctx.advance(5 * SECOND, 100);
+  assert.notEqual(ctx.state('temperature-outdoor').state, 12.3);
+});
+
+test('r1-5 the hot water ceiling lowered while a command waits: not written', async (t) => {
+  const ctx = await setup({ config: ALLOW });
+  t.after(ctx.stop);
+  ctx.hp.delay = 400;
+  const ack = ctx.fire('dhw-setpoint', 54);
+  await ctx.advance(200, 10);
+  await ctx.app.configUpdated({ ...ALLOW, dhw_max_temperature: 50 });
+  await ctx.advance(5 * SECOND, 50);
+  assert.match(String((await ack).error), /plafond/);
+  assert.deepEqual(ctx.hp.writes(), []);
+});
+
+test('r1-5 the time of a read is in /data before the read', async (t) => {
+  const store = memoryStore();
+  const ctx = await setup({ store, create: false });
+  t.after(ctx.stop);
+  const first = store.data.lastAttemptAt;
+  ctx.hp.silent.add(1000);
+  for (let i = 0; i < 700 && ctx.hp.open.size === 0; i += 1) await ctx.advance(100, 100);
+  assert.equal(ctx.hp.open.size, 1, 'the next read is waiting for its answer');
+  assert.ok(store.data.lastAttemptAt > first, 'already in /data');
+});
+
+test('r1-5 an old read is not republished at connected, the heat pump online', async (t) => {
+  const ctx = await setup({ config: { host: HOST, poll_interval: 600 } });
+  t.after(ctx.stop);
+  await ctx.advance(3 * MINUTE, 1000);
+  const count = ctx.gladys.fake.states.length;
+  await ctx.app.connected({ host: HOST, poll_interval: 600 });
+  await ctx.app.deviceCreated(ctx.gladys.fake.discoveredDevices[0]);
+  await ctx.advance(2 * SECOND, 100);
+  assert.equal(ctx.gladys.fake.states.length, count);
+});
+
+for (const role of ['dhw-setpoint', 'system-mode']) {
+  test(`r1-5 a write answered by something else than its echo is not confirmed (${role})`, async (t) => {
+    const ctx = await setup({ config: ALLOW });
+    t.after(ctx.stop);
+    ctx.hp.badEcho = true;
+    const ack = await ctx.press(role, role === 'dhw-setpoint' ? 50 : 'standby');
+    assert.equal(ack.success, false);
+    assert.match(String(ack.error), /sans confirmation/);
+  });
+}
+
+for (const flag of ['wrongTransaction', 'wrongUnit']) {
+  test(`r1-5 an answer to another request (${flag}) is never taken`, async (t) => {
+    const clock = testClock({ start: NOW });
+    const hp = fakeIdm({ timers: clock.timers });
+    hp[flag] = true;
+    const ctx = await setup({ clock, hp, create: false });
+    t.after(ctx.stop);
+    assert.equal(ctx.gladys.fake.discoveredDevices.length, 0);
+    assert.equal(ctx.gladys.fake.connectionStatus.connected, false);
+  });
+}

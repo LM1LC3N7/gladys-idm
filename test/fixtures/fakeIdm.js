@@ -107,8 +107,16 @@ class FakeSocket extends EventEmitter {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
-    this.hp.open.delete(this);
-    setImmediate(() => this.emit('close'));
+    // Like a real device, the heat pump sees the connection gone a moment later.
+    setImmediate(() => {
+      this.hp.open.delete(this);
+      this.emit('close');
+    });
+  }
+
+  /** A FIN: the fake closes its side at once. */
+  end() {
+    this.destroy();
   }
 
   setNoDelay() {}
@@ -137,6 +145,10 @@ export function fakeIdm({ timers, values = defaultValues(), unitId = 1 } = {}) {
     /** Writes applied even when their connection closed before the answer. */
     applyClosedWrites: false,
     badEcho: false,
+    /** One client at a time (a second connection is refused), answers with a wrong transaction or unit id. */
+    singleClient: false,
+    wrongTransaction: false,
+    wrongUnit: false,
     /** The words of a data point, by its start address. */
     set(address, value) {
       map.set(
@@ -217,10 +229,10 @@ export function fakeIdm({ timers, values = defaultValues(), unitId = 1 } = {}) {
           answer = Buffer.from([fc | 0x80, 1]);
         }
         const out = Buffer.alloc(7 + answer.length);
-        out.writeUInt16BE(tid, 0);
+        out.writeUInt16BE(hp.wrongTransaction ? (tid + 1) & 0xffff : tid, 0);
         out.writeUInt16BE(0, 2);
         out.writeUInt16BE(answer.length + 1, 4);
-        out[6] = uid;
+        out[6] = hp.wrongUnit ? (uid + 1) & 0xff : uid;
         answer.copy(out, 7);
         socket.emit('data', out);
       }, hp.delay);
@@ -230,7 +242,7 @@ export function fakeIdm({ timers, values = defaultValues(), unitId = 1 } = {}) {
       hp.connections += 1;
       timers.setTimeout(() => {
         if (socket.destroyed) return;
-        if (hp.down) {
+        if (hp.down || (hp.singleClient && hp.open.size > 0)) {
           hp.refused += 1;
           socket.emit('error', Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }));
           return;

@@ -254,6 +254,8 @@ export const HOUR = 60 * MINUTE;
 export const TIMINGS = {
   /** Opening the TCP connection of a poll. */
   connectTimeout: 3 * SECOND,
+  /** A session closed gracefully waits this long for the heat pump to close its side. */
+  closeWait: 500,
   /** One answer. */
   requestTimeout: 2 * SECOND,
   /** A refused connection of a stop is tried again this often, until its deadline. */
@@ -268,13 +270,13 @@ export const TIMINGS = {
   /** The "Test the connection" button never reads sooner than this after the last read. */
   testCooldown: 10 * SECOND,
   /**
-   * Commands (Gladys waits 5 s for the ack): the connection, the fresh read
-   * and the write must be done by 3.5 s after the click, or the command is
-   * refused unsent; the read back that confirms it is awaited until 4.3 s,
-   * after which the command is "sent, without confirmation".
+   * Gladys waits 5 s for the ack: every click is answered by 3.5 s (a command
+   * or a stop still running goes on, and the answer says what is known);
+   * a stop is tried (connection refused, closed, timeout) until 3 s after
+   * its start.
    */
-  commandSendBy: 3_500,
-  commandAnswerBy: 4_300,
+  commandSendBy: 3_000,
+  commandAnswerBy: 3_500,
   commandConnectMax: 2_000,
   commandReadMax: 1_500,
   commandMinRead: 300,
@@ -295,6 +297,8 @@ export const TIMINGS = {
   /** A stop not confirmed is sent again by the reads of the next 3 minutes, three times at most. */
   stopGuard: 3 * MINUTE,
   stopReasserts: 3,
+  /** A stop guard is checked this often (read, then written again if needed), whatever the interval. */
+  stopRetry: 15 * SECOND,
   /** A stop sent again by a read leaves at least this long after the read closed the line. */
   reassertDelay: SECOND,
   /** Last values older than this are never sent again to Gladys (connected, device created). */

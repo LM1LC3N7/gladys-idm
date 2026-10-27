@@ -34,9 +34,11 @@ Gladys ⇄ SDK ⇄ src/handlers.js ⇄ src/app.js (IdmApp)
   quota (6 per register and hour, never for a lower setpoint), function 16 write, echo and read back;
   one at a time in order on one session (a scene sets them all).
 - **Stops** (protective): system standby and circuit off; never behind the option, the bounds, a read
-  or a command; drop every command that arrived before; retried for 3.5 s; kept in `/data` and sent
-  again (three times at most in 3 minutes) when not confirmed, also at a restart before the
-  configuration is read.
+  or a command; drop every command that arrived before; retried for 3 s; kept in `/data` with the
+  value of before and checked every 15 s for 3 minutes whatever the interval (tried again when it
+  never left, sent again three times at most while the value of before shows), also at a restart
+  before the configuration is read. One lock for the line: a session opens only once the previous
+  one is closed (FIN, then the heat pump's close, 500 ms at most).
 
 ## Development
 

@@ -35,7 +35,7 @@
 //     values sets them all, one after the other on the same connection);
 //     confirmed only by the echo of the write and a read back equal to the
 //     value asked; else "sent, without confirmation" and spaced reads;
-//   - answered to Gladys by 4.3 s; a command still waiting its turn then goes
+//   - answered to Gladys by 3.5 s; a command still waiting its turn then goes
 //     on (15 s at most after its arrival), and the answer says so;
 //   - the ack never waits for a publication to Gladys.
 // Stops (system mode "standby", a heating circuit "off") protect: never held
@@ -43,10 +43,13 @@
 // read, a backoff, a device never read, nor a configuration not read yet
 // (after a restart, a stop kept in /data is sent again before it); every
 // command that arrived before a stop and has not left is dropped; a refused
-// connection is tried again every 250 ms until 3.5 s after the click; a stop
-// not confirmed is kept in /data and sent again by the reads of the next 3
-// minutes (three times at most) while the heat pump still shows the value of
-// before, unless a newer command to the same register left after it.
+// connection is tried again every 250 ms for 3 s; a stop not confirmed is
+// kept in /data with the value of before and checked every 15 s for 3
+// minutes, whatever the interval: tried again when it never left, sent again
+// (three times at most) while the heat pump still shows the value of before,
+// never over another value set on the heat pump nor after a newer command to
+// the same register that left. One lock for the line: a session opens only
+// once the previous one is closed.
 //
 // In-memory times (deadlines, guards, the time of the last read) are on a
 // monotonic clock (`clock`); the wall clock (`now`) only for /data.
@@ -169,8 +172,6 @@ export class IdmApp {
     this.guards = new Map();
     /** Register -> a stop not confirmed (see protect). */
     this.stopGuards = new Map();
-    /** Pending reaffirmations of stops (timers). */
-    this.reasserts = new Set();
   }
 
   /** The monotonic clock (every in-memory time). */
@@ -231,6 +232,8 @@ export class IdmApp {
           register,
           until: this.now() + (g.until - this.mono()),
           reasserts: g.reasserts,
+          written: g.written,
+          before: g.before.slice(0, 2),
         });
       }
     }
@@ -243,33 +246,39 @@ export class IdmApp {
 
   /**
    * At the start of the container, before the configuration is read: the
-   * stops kept in /data (not confirmed before the restart) are sent again,
-   * to the heat pump they were sent to.
+   * stops kept in /data (not confirmed before the restart) are checked at
+   * once on the heat pump they were sent to, and sent again unless it shows
+   * the stop or another value than the one before it (set on the heat pump
+   * meanwhile); then checked every 15 s until their guard ends.
    */
   async boot() {
     await this.loadMemory();
     for (const kept of this.memory.stops ?? []) {
       const plan = this.stopPlan(kept.register);
-      if (!plan || kept.reasserts >= TIMINGS.stopReasserts) {
+      if (!plan) {
         continue;
       }
       const target = { host: kept.host, port: kept.port, unitId: kept.unitId };
-      this.stopGuards.set(kept.register, {
-        readKey: plan.command.read,
-        stopValue: plan.expected,
-        target,
-        from: undefined,
-        sentAt: this.mono(),
-        until: this.mono() + Math.min(kept.until - this.now(), TIMINGS.stopGuard),
-        reasserts: kept.reasserts + 1,
+      const guard = this.ensureStopGuard(kept.register, plan, target);
+      Object.assign(guard, {
+        before: [...kept.before],
+        written: kept.written,
+        reasserts: kept.reasserts,
+        // The NAVIGATOR had the time to apply it: no delay before the check.
+        sentAt: undefined,
         sticky: true,
+        until: this.mono() + Math.min(kept.until - this.now(), TIMINGS.stopGuard),
       });
       this.logger.warn(
-        `iDM: a stop kept in /data (register ${kept.register}) is sent again after the restart`,
+        `iDM: a stop kept in /data (register ${kept.register}) is checked again after the restart`,
       );
-      this.protect(plan, this.mono(), target, { resend: true }).catch((err) =>
-        this.logger.warn(`iDM: stop sent again after the restart: ${err.message}`),
-      );
+      this.queueStop({
+        plan,
+        register: kept.register,
+        target,
+        received: this.mono(),
+        kind: 'check',
+      });
     }
     this.persistStops();
   }
@@ -365,10 +374,15 @@ export class IdmApp {
     this.publisher.stop();
     // Guards of commands belong to this configuration only (stops keep theirs: their own target).
     this.guards.clear();
-    for (const handle of this.reasserts) {
-      this.timers.clearTimeout(handle);
+  }
+
+  /** The container stops: every timer, the checks of the stops too (they are in /data). */
+  shutdown() {
+    this.stop();
+    for (const guard of this.stopGuards.values()) {
+      if (guard.timer) this.timers.clearTimeout(guard.timer);
+      guard.timer = undefined;
     }
-    this.reasserts.clear();
   }
 
   clearTimer() {
@@ -484,11 +498,26 @@ export class IdmApp {
 
   /**
    * Runs `fn(session)` on its own connection to `target`; the line is held
-   * until it ends. `retryUntil`: a refused connection is tried again every
+   * until it ends. The only lock of the line: a session opens only once no
+   * other holds it (a stop ends any other session first and waits for its
+   * end). `yieldTo()`: checked right before the line is taken, with no
+   * `await` in between; true gives the turn up (a command or a read before
+   * a stop waiting). `retryUntil`: a refused connection is tried again every
    * 250 ms until then (nothing is sent before the connection, so this never
    * repeats a write).
    */
-  async useLine(kind, target, timeoutMs, fn, { retryUntil } = {}) {
+  async useLine(kind, target, timeoutMs, fn, { retryUntil, yieldTo } = {}) {
+    while (this.active) {
+      if (kind === 'protect' && this.active.kind !== 'protect') {
+        this.active.abort('line taken');
+      }
+      await this.active.done;
+    }
+    if (yieldTo?.()) {
+      throw Object.assign(new ModbusError(ERROR_KINDS.ABORTED, 'turn given up'), {
+        yielded: true,
+      });
+    }
     let finish;
     const record = {
       kind,
@@ -546,7 +575,8 @@ export class IdmApp {
       }
       return await fn(session, record);
     } finally {
-      record.session?.close();
+      // The line is free only once the connection is closed (never two at once).
+      await record.session?.close();
       if (this.active === record) {
         this.active = undefined;
       }
@@ -659,8 +689,12 @@ export class IdmApp {
     let result;
     let failure;
     try {
-      result = await this.useLine('read', target, TIMINGS.connectTimeout, (session) =>
-        this.readAll(session),
+      result = await this.useLine(
+        'read',
+        target,
+        TIMINGS.connectTimeout,
+        (session) => this.readAll(session),
+        { yieldTo: () => this.reserved > 0 || this.stops.length > 0 },
       );
     } catch (err) {
       failure = err;
@@ -842,7 +876,13 @@ export class IdmApp {
       seen: this.seen,
       created: this.createdRoles(),
     });
-    const devices = [buildDevice(this.gladys, { language: this.config.language, roles })];
+    const devices = [
+      buildDevice(this.gladys, {
+        language: this.config.language,
+        roles,
+        dhwCap: this.config.dhwCap,
+      }),
+    ];
     const json = JSON.stringify(devices);
     if (json === this.published) {
       return;
@@ -860,13 +900,13 @@ export class IdmApp {
   }
 
   /** Pushes the given values (only these) to the created features. */
-  queueValues(values, created = this.createdFeatures()) {
+  queueValues(values, created = this.createdFeatures(), at = this.mono()) {
     for (const { device_feature_external_id: id, ...value } of deviceStates(
       ids(this.gladys),
       values,
     )) {
       if (created.has(id)) {
-        this.publisher.push(id, value);
+        this.publisher.push(id, value, at);
       }
     }
   }
@@ -875,7 +915,7 @@ export class IdmApp {
   queueStates(created) {
     const u = this.unit;
     if (u.online === true && u.values && this.mono() - u.readAt <= TIMINGS.freshFor) {
-      this.queueValues(u.values, created);
+      this.queueValues(u.values, created, u.readAt);
     }
   }
 
@@ -1043,7 +1083,7 @@ export class IdmApp {
   }
 
   /**
-   * Queues a command; answers by 4.3 s after its arrival: its outcome, or,
+   * Queues a command; answers by 3.5 s after its arrival: its outcome, or,
    * when it is still waiting its turn or its answer, what is known then (it
    * goes on in the background).
    */
@@ -1097,7 +1137,6 @@ export class IdmApp {
             await this.stopWorker;
           }
           await this.takeLine(['read']);
-          await this.freeLine();
           if (this.queue.length === 0) break;
           const job = this.queue[0];
           if (!sameTarget(job.target, this.target()) || job.generation !== this.generation) {
@@ -1106,10 +1145,18 @@ export class IdmApp {
             continue;
           }
           try {
-            await this.useLine('command', job.target, TIMINGS.commandConnectMax, (session) =>
-              this.drain(session, job.target),
+            await this.useLine(
+              'command',
+              job.target,
+              TIMINGS.commandConnectMax,
+              (session) => this.drain(session, job.target),
+              // Checked right before the line is taken: a stop arrived meanwhile goes first.
+              { yieldTo: () => this.stops.length > 0 || Boolean(this.stopWorker) },
             );
           } catch (err) {
+            if (err.yielded) {
+              continue;
+            }
             // The connection failed or was taken: the job in front answers it.
             const front = this.queue[0];
             if (front && front === job && !job.started) {
@@ -1128,6 +1175,10 @@ export class IdmApp {
   /** Runs the queued jobs for `target` on one session. */
   async drain(session, target) {
     while (this.queue.length > 0) {
+      if (this.stops.length > 0) {
+        // A stop waits: the session ends, the stop goes, the queue after it.
+        return;
+      }
       const job = this.queue[0];
       if (!sameTarget(job.target, target)) {
         return;
@@ -1284,9 +1335,7 @@ export class IdmApp {
           this.lastWriteAt.set(command.address, at);
           this.recentWrites(command.address).push(at);
           // A newer command for this register left: an older stop is never sent again after it.
-          if (this.stopGuards.delete(command.address)) {
-            this.persistStops();
-          }
+          this.dropStopGuard(command.address);
         },
       });
     } catch (err) {
@@ -1329,34 +1378,20 @@ export class IdmApp {
   // --- The stops (protective) ---------------------------------------------------
 
   /**
-   * A stop: queued with the other stops (never behind a command or a read),
-   * answered by 4.3 s after the click. A second press of the same stop while
-   * one waits joins it.
+   * A stop clicked: queued with the other stops (never behind a command or a
+   * read), answered by 3.5 s after the click. A second press of the same
+   * stop while one waits joins it.
    */
-  async protect(plan, received, target, { resend = false } = {}) {
+  async protect(plan, received, target) {
     // Every command that arrived before this stop and has not left gives way.
     this.protectSeq += 1;
-    const register = plan.command.address;
-    let job = this.stops.find((j) => j.register === register && sameTarget(j.target, target));
-    if (!job) {
-      job = {
-        plan,
-        register,
-        target,
-        received,
-        resend,
-        state: { written: false, sentAt: undefined },
-      };
-      job.done = new Promise((resolve) => {
-        job.resolve = resolve;
-      });
-      this.stops.push(job);
-      // The poll and the commands give the line now.
-      if (this.active && this.active.kind !== 'protect') {
-        this.active.abort('line taken');
-      }
-      this.runStops();
-    }
+    const job = this.queueStop({
+      plan,
+      register: plan.command.address,
+      target,
+      received,
+      kind: 'click',
+    });
     const answerIn = Math.max(0, received + TIMINGS.commandAnswerBy - this.mono());
     let timer;
     const outcome = await new Promise((resolve) => {
@@ -1376,6 +1411,34 @@ export class IdmApp {
     return undefined;
   }
 
+  /**
+   * Queues a stop job: `click` (always written), `check` (a guard's periodic
+   * check: read, then written again only when `decideStop` says so). A job
+   * of the same register and target already waiting is joined (a click
+   * replaces a check).
+   */
+  queueStop({ plan, register, target, received, kind }) {
+    let job = this.stops.find((j) => j.register === register && sameTarget(j.target, target));
+    if (job) {
+      if (kind === 'click' && job.kind === 'check' && !job.running) {
+        job.kind = 'click';
+        job.received = received;
+      }
+      return job;
+    }
+    job = { plan, register, target, received, kind, state: { written: false, sentAt: undefined } };
+    job.done = new Promise((resolve) => {
+      job.resolve = resolve;
+    });
+    this.stops.push(job);
+    // The poll and the commands give the line now (synchronously).
+    if (this.active && this.active.kind !== 'protect') {
+      this.active.abort('line taken');
+    }
+    this.runStops();
+    return job;
+  }
+
   /** The worker of the stops: before anything else on the line. */
   runStops() {
     if (this.stopWorker) {
@@ -1386,9 +1449,13 @@ export class IdmApp {
       try {
         while (this.stops.length > 0) {
           const job = this.stops[0];
-          await this.takeLine(['read', 'command']);
-          await this.freeLine();
-          await this.sendStop(job);
+          job.running = true;
+          try {
+            await this.sendStop(job);
+          } catch (err) {
+            this.logger.warn(`iDM: stop failed: ${err.message}`);
+            job.resolve({ error: this.refusal(ERRORS.notSent(errorReason(err))) });
+          }
           this.stops.shift();
         }
       } finally {
@@ -1400,19 +1467,79 @@ export class IdmApp {
   }
 
   /**
-   * One stop: one write without a fresh read; a refused connection, a
-   * closed connection, a timeout or a wrong answer is tried again every
-   * 250 ms until 3.5 s after the click (the write is idempotent); the echo of
-   * the write and the value read back confirm it.
+   * What a value read says of a stop guard: 'done' (the stop shows), 'wait',
+   * 'drop' (another value than the one before the stop: someone changed it
+   * on the heat pump, never overridden) or 'resend'. When the value of
+   * before is unknown (a stop clicked before any read), the first value
+   * read after the stop is taken as that value. A stop written is sent again
+   * only once the NAVIGATOR had the time to apply it (20 s), three times at
+   * most; a stop that never left is tried again at every check.
+   */
+  decideStop(stop, value, readStartedAt) {
+    if (value === undefined) {
+      return 'wait';
+    }
+    if (value === stop.stopValue) {
+      return stop.sticky ? 'wait' : 'done';
+    }
+    if (stop.sentAt !== undefined && readStartedAt < stop.sentAt + TIMINGS.applyDelay) {
+      return 'wait';
+    }
+    if (stop.before.length === 0) {
+      stop.before.push(value);
+    } else if (!stop.before.includes(value)) {
+      return 'drop';
+    }
+    if (stop.written && stop.reasserts >= TIMINGS.stopReasserts) {
+      return 'wait';
+    }
+    return 'resend';
+  }
+
+  /**
+   * One stop job. A click writes at once, without a fresh read; a check
+   * reads the register first and writes only when `decideStop` says so. A
+   * refused connection, a closed connection, a timeout or a wrong answer is
+   * tried again every 250 ms until 3 s after the start (the write is
+   * idempotent); the echo of the write and the value read back confirm it.
    */
   async sendStop(job) {
     const { plan, target, register, state } = job;
-    const retryUntil = job.received + TIMINGS.commandSendBy;
-    const from = this.unit.values?.[plan.command.read];
+    const retryUntil = Math.max(job.received, this.mono()) + TIMINGS.commandSendBy;
+    const known = sameTarget(target, this.target())
+      ? this.unit.values?.[plan.command.read]
+      : undefined;
     // A command to this register, sent and not confirmed, may still land after the stop.
-    const pending = this.guards.get(plan.command.read);
-    const sticky = Boolean(pending && this.guardActive(plan.command.read)) || job.resend;
+    const pending = this.guardActive(plan.command.read)
+      ? this.guards.get(plan.command.read)
+      : undefined;
+    if (job.kind === 'click') {
+      const guard = this.ensureStopGuard(register, plan, target);
+      for (const value of [pending?.expected, known]) {
+        if (value !== undefined && value !== plan.expected && !guard.before.includes(value)) {
+          guard.before.push(value);
+        }
+      }
+      guard.sticky = guard.sticky || Boolean(pending);
+      guard.until = this.mono() + TIMINGS.stopGuard;
+    }
+    const outcome = { decision: undefined, back: undefined };
     const attempt = async (session) => {
+      if (job.kind === 'check') {
+        const guard = this.stopGuards.get(register);
+        if (!guard) {
+          outcome.decision = 'drop';
+          return;
+        }
+        const startedAt = this.mono();
+        const value = await this.readPoint(session, plan.command);
+        outcome.decision = this.decideStop(guard, value, startedAt);
+        if (outcome.decision !== 'resend') {
+          outcome.back = value;
+          return;
+        }
+        this.logger.warn(`iDM: ${plan.role} still ${value} after a stop: stop sent again`);
+      }
       const request = writeRequest(register, plan.command.type, plan.written);
       const echo = await session.request(request, {
         timeoutMs: Math.max(250, Math.min(TIMINGS.requestTimeout, retryUntil - this.mono())),
@@ -1420,24 +1547,28 @@ export class IdmApp {
           state.written = true;
           state.sentAt = this.mono();
           this.lastSentAt = state.sentAt;
-          this.recentWrites(register).push(state.sentAt);
+          const guard = this.stopGuards.get(register);
+          if (guard) {
+            if (job.kind === 'check' && guard.written) {
+              guard.reasserts += 1;
+            }
+            guard.written = true;
+            guard.sentAt = state.sentAt;
+          }
         },
       });
       if (!isWriteEcho(request, echo)) {
         session.fail(new ModbusError(ERROR_KINDS.PROTOCOL, 'not the echo of the write'));
         throw new ModbusError(ERROR_KINDS.PROTOCOL, 'not the echo of the write', { sent: true });
       }
-      return this.readPoint(session, plan.command);
+      outcome.back = await this.readPoint(session, plan.command);
     };
     const AGAIN = [ERROR_KINDS.CLOSED, ERROR_KINDS.TIMEOUT, ERROR_KINDS.PROTOCOL];
-    let back;
     let failure;
-    this.logger.info(`iDM: stop ${plan.role}${job.resend ? ' (sent again)' : ''}`);
+    if (job.kind === 'click') this.logger.info(`iDM: stop ${plan.role}`);
     for (;;) {
       try {
-        back = await this.useLine('protect', target, TIMINGS.connectTimeout, attempt, {
-          retryUntil,
-        });
+        await this.useLine('protect', target, TIMINGS.connectTimeout, attempt, { retryUntil });
         failure = undefined;
         break;
       } catch (err) {
@@ -1445,78 +1576,112 @@ export class IdmApp {
         if (!AGAIN.includes(err?.kind) || this.mono() + TIMINGS.connectRetry >= retryUntil) {
           break;
         }
+        // A check that read and decided not to write is not tried again.
+        if (job.kind === 'check' && outcome.decision && outcome.decision !== 'resend') {
+          break;
+        }
         await new Promise((resolve) => this.timers.setTimeout(resolve, TIMINGS.connectRetry));
       }
     }
-    const confirmed = back === plan.expected;
-    if (confirmed && !sticky) {
-      if (this.stopGuards.delete(register)) this.persistStops();
-    } else if (state.written || this.stopGuards.has(register)) {
-      this.keepStopGuard(register, plan, target, {
-        from: pending?.expected ?? from,
-        previous: from,
-        sentAt: state.sentAt ?? this.mono(),
-        sticky,
-      });
+    const confirmed = outcome.back === plan.expected;
+    const guard = this.stopGuards.get(register);
+    if (guard) {
+      if ((confirmed && !guard.sticky) || outcome.decision === 'done') {
+        this.dropStopGuard(register, 'confirmed');
+      } else if (outcome.decision === 'drop') {
+        this.logger.info(
+          `iDM: ${plan.role} changed after the stop (not by Gladys): the stop is not sent again`,
+        );
+        this.dropStopGuard(register, 'changed');
+      } else {
+        this.persistStops();
+        this.armStopCheck(register);
+      }
+    }
+    if (state.written) {
       this.followUp();
-    } else {
-      // Never left: kept too, so that the next reads (or a restart) send it.
-      this.keepStopGuard(register, plan, target, {
-        from,
-        previous: from,
-        sentAt: this.mono(),
-        sticky,
-      });
     }
-    if (sameTarget(target, this.target()) && back !== undefined) {
-      this.noteValues({ [plan.command.read]: back });
+    if (sameTarget(target, this.target()) && outcome.back !== undefined) {
+      this.noteValues({ [plan.command.read]: outcome.back });
     }
-    let outcome;
-    if (confirmed) {
-      this.logger.info(`iDM: stop ${plan.role} confirmed by the heat pump`);
-      outcome = {};
+    let result;
+    if (confirmed || (job.kind === 'check' && !failure)) {
+      if (confirmed) this.logger.info(`iDM: stop ${plan.role} confirmed by the heat pump`);
+      result = {};
     } else if (failure) {
       const reason = errorReason(failure);
       this.logger.warn(`iDM: stop ${plan.role} failed (${reason})`);
       if (!state.written) {
-        outcome = { error: this.refusal(ERRORS.notSent(reason)) };
+        result = { error: this.refusal(ERRORS.notSent(reason)) };
       } else if (failure.kind === ERROR_KINDS.REFUSED && NOT_APPLIED_EXCEPTIONS.has(failure.code)) {
-        outcome = { error: this.refusal(ERRORS.refused(reason)) };
+        result = { error: this.refusal(ERRORS.refused(reason)) };
       } else {
-        outcome = { error: this.refusal(ERRORS.sentUnconfirmed(reason)) };
+        result = { error: this.refusal(ERRORS.sentUnconfirmed(reason)) };
       }
     } else {
-      outcome = {
+      result = {
         error: this.refusal(
           ERRORS.sentUnconfirmed(word(ERRORS.readBackDiffers, this.config.language)),
         ),
       };
     }
-    job.resolve(outcome);
+    job.resolve(result);
   }
 
-  /** Sets (or extends) the guard of a stop not confirmed, kept in /data. */
-  keepStopGuard(register, plan, target, { from, previous, sentAt, sticky }) {
-    const existing = this.stopGuards.get(register);
-    if (existing && this.mono() < existing.until && sameTarget(existing.target, target)) {
-      existing.sentAt = Math.max(existing.sentAt, sentAt);
-      existing.sticky = existing.sticky || sticky;
-      existing.from = existing.from ?? from;
-      existing.previous = existing.previous ?? previous;
-    } else {
-      this.stopGuards.set(register, {
+  /** The guard of a stop of `register` (created when none runs for this target). */
+  ensureStopGuard(register, plan, target) {
+    let guard = this.stopGuards.get(register);
+    if (!guard || this.mono() >= guard.until || !sameTarget(guard.target, target)) {
+      if (guard) this.dropStopGuard(register, 'replaced');
+      guard = {
         readKey: plan.command.read,
         stopValue: plan.expected,
         target,
-        from,
-        previous,
-        sentAt,
+        before: [],
+        written: false,
+        sentAt: undefined,
         until: this.mono() + TIMINGS.stopGuard,
         reasserts: 0,
-        sticky,
-      });
+        sticky: false,
+        timer: undefined,
+      };
+      this.stopGuards.set(register, guard);
     }
+    return guard;
+  }
+
+  dropStopGuard(register) {
+    const guard = this.stopGuards.get(register);
+    if (!guard) return;
+    if (guard.timer) this.timers.clearTimeout(guard.timer);
+    this.stopGuards.delete(register);
     this.persistStops();
+  }
+
+  /**
+   * The periodic check of a stop guard: every 15 s for the whole guard,
+   * whatever the refresh interval and even when the reads fail.
+   */
+  armStopCheck(register) {
+    const guard = this.stopGuards.get(register);
+    if (!guard) return;
+    if (guard.timer) this.timers.clearTimeout(guard.timer);
+    guard.timer = this.timers.setTimeout(() => {
+      guard.timer = undefined;
+      if (this.stopGuards.get(register) !== guard) return;
+      if (this.mono() >= guard.until) {
+        this.dropStopGuard(register);
+        return;
+      }
+      const plan = this.stopPlan(register);
+      this.queueStop({
+        plan,
+        register,
+        target: guard.target,
+        received: this.mono(),
+        kind: 'check',
+      });
+    }, TIMINGS.stopRetry);
   }
 
   // --- Guards --------------------------------------------------------------------
@@ -1553,67 +1718,26 @@ export class IdmApp {
         this.guards.delete(key);
       }
     }
-    let changed = false;
     for (const [register, stop] of [...this.stopGuards]) {
-      if (
-        this.mono() >= stop.until ||
-        (this.lastWriteAt.get(register) ?? -Infinity) > stop.sentAt
-      ) {
-        this.stopGuards.delete(register);
-        changed = true;
+      if (this.mono() >= stop.until) {
+        this.dropStopGuard(register);
         continue;
       }
       if (!sameTarget(stop.target, this.target())) {
         continue;
       }
-      const value = values[stop.readKey];
-      if (value === undefined) {
-        continue;
-      }
-      if (value === stop.stopValue) {
-        if (!stop.sticky) {
-          this.stopGuards.delete(register);
-          changed = true;
-        }
-        continue;
-      }
-      if (readStartedAt < stop.sentAt + TIMINGS.applyDelay) {
-        continue;
-      }
-      const before = [stop.from, stop.previous].filter((v) => v !== undefined);
-      if (before.length > 0 && !before.includes(value)) {
+      // A read lifts a guard or ends it; the resending is the job of the checks.
+      const decision = this.decideStop(stop, values[stop.readKey], readStartedAt);
+      if (decision === 'done') {
+        this.dropStopGuard(register);
+      } else if (decision === 'drop') {
         this.logger.info(
-          `iDM: ${stop.readKey} changed to ${value} after the stop (not by Gladys): not sent again`,
+          `iDM: ${stop.readKey} changed after the stop (not by Gladys): the stop is not sent again`,
         );
-        this.stopGuards.delete(register);
-        changed = true;
-        continue;
+        this.dropStopGuard(register);
+      } else {
+        this.persistStops();
       }
-      if (
-        stop.reasserts >= TIMINGS.stopReasserts ||
-        this.stops.some((j) => j.register === register)
-      ) {
-        continue;
-      }
-      stop.reasserts += 1;
-      changed = true;
-      this.logger.warn(`iDM: ${stop.readKey} still ${value} after a stop: stop sent again`);
-      const generation = this.generation;
-      const handle = this.timers.setTimeout(() => {
-        this.reasserts.delete(handle);
-        const current = this.stopGuards.get(register);
-        if (generation !== this.generation || current !== stop) {
-          return;
-        }
-        const plan = this.stopPlan(register);
-        this.protect(plan, this.mono(), stop.target, { resend: true }).catch((err) =>
-          this.logger.warn(`iDM: stop sent again: ${err.message}`),
-        );
-      }, TIMINGS.reassertDelay);
-      this.reasserts.add(handle);
-    }
-    if (changed) {
-      this.persistStops();
     }
   }
 

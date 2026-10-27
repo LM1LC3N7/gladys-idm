@@ -49,7 +49,7 @@ test('the configuration: commands off unless strictly true, unit id checked', ()
   assert.deepEqual(normalizeConfig({}).circuits, ['a']);
 });
 
-test('/data: repaired and bounded; a stop never outlives its guard; future times cut down', () => {
+test('/data: repaired and bounded; a stop never outlives its guard; a guard beyond its duration is invalid', () => {
   const now = Date.UTC(2026, 9, 27);
   const m = normalizeMemory(
     {
@@ -61,7 +61,16 @@ test('/data: repaired and bounded; a stop never outlives its guard; future times
           unitId: 1,
           register: 1005,
           until: now + 1e9,
+        },
+        {
+          host: '192.168.1.60',
+          port: 502,
+          unitId: 1,
+          register: 1005,
+          until: now + 60_000,
           reasserts: 9,
+          written: true,
+          before: ['automatic', 'Bad Value', 'away', 'eco'],
         },
         { host: '192.168.1.60', port: 502, unitId: 1, register: 1032, until: now + 1000 },
         { host: 'evil\r\nhost', port: 502, unitId: 1, register: 1005, until: now + 1000 },
@@ -72,9 +81,15 @@ test('/data: repaired and bounded; a stop never outlives its guard; future times
     now,
   );
   assert.equal(m.lastAttemptAt, now);
-  assert.equal(m.stops.length, 1, 'only a known stop register, a clean host, not expired');
-  assert.equal(m.stops[0].until, now + 3 * 60_000);
+  assert.equal(
+    m.stops.length,
+    1,
+    'a known stop register, a clean host, not expired, not in the future',
+  );
+  assert.equal(m.stops[0].until, now + 60_000);
   assert.equal(m.stops[0].reasserts, 3);
+  assert.equal(m.stops[0].written, true);
+  assert.deepEqual(m.stops[0].before, ['automatic', 'away']);
   assert.equal(m.stops[0].value, 0);
   assert.deepEqual(m.target, { host: '192.168.1.60', port: 502, unitId: 1 });
   assert.deepEqual(normalizeMemory('garbage', now), {
