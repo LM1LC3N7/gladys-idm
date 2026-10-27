@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-27
+
 ### Added
 
 - iDM heat pumps with the NAVIGATOR 2.0 controller over local Modbus TCP: outdoor, flow, return,
@@ -22,3 +24,6 @@ the notes of the version's GitHub Release.
 - Standby and turning a circuit off never depend on that option; a stop not confirmed is sent again
   by the next reads and after a restart.
 - "Test the connection" button, docs in English and French, cover image.
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-idm/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-idm/releases/tag/v0.1.1
