@@ -35,7 +35,13 @@ to date at the end of every milestone.
       running check and passes waiting ones (3); `abort()` destroys a session
       still closing (4); tests for the 20 s delay, the graceful close, the
       3.5 s answer and the 3 s budget (5); TODO.md (6). Tests named `r2-…`.
-- [ ] **Review r3** (last).
+- [x] **Review r3** (2026-10-27): APPROUVÉ, no blocker.
+- [ ] **Next patch — review r3 leftovers**: tests for the click that resets the
+      resends, the 1 s delay of a check that gives way, and the read back after
+      a resend; a poll due during a check is pushed back a whole interval; a
+      steady stream of commands could push the checks to the end of the guard
+      (artificial). At milestone 2: a single-client pump that keeps our closed
+      connection would block a stop.
 - [ ] **Milestone 2 — real heat pump**: run against a real NAVIGATOR 2.0 (see "To check").
 - [ ] **Milestone 3 — more**: thermal energy (1748-1762, kWh, as non-index
       sensors), eco room setpoint (1415+), PV surplus write (74, cyclic,
