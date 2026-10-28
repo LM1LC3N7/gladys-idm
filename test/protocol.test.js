@@ -122,10 +122,11 @@ test('special values are not measures', () => {
   assert.equal(operatingState(16), undefined);
 });
 
-test('writes: one data point, function 16; hot water never above 60 °C', () => {
+test('writes: one data point, function 16; hot water never above 65 °C', () => {
   const req = writeRequest(1032, 'uchar', 55);
   assert.deepEqual([...req], [16, 0x04, 0x08, 0, 1, 2, 0, 55]);
-  assert.throws(() => writeRequest(1032, 'uchar', 61), /out of bounds/);
+  assert.throws(() => writeRequest(1032, 'uchar', 66), /out of bounds/);
+  assert.deepEqual([...writeRequest(1032, 'uchar', 65)], [16, 0x04, 0x08, 0, 1, 2, 0, 65]);
   assert.throws(() => writeRequest(1032, 'uchar', 34), /out of bounds/);
   assert.throws(() => writeRequest(1005, 'uchar', 300));
   assert.throws(() => writeRequest(1401, 'float', Number.NaN));

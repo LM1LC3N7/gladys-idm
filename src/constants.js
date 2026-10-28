@@ -209,7 +209,7 @@ export const circuitRole = (circuit, suffix) => `circuit-${circuit}-${suffix}`;
 
 /**
  * The bounds of the values written, from the iDM table (min, max), never
- * wider: the hot water setpoint 35-95 °C in the table is capped at 60 °C here
+ * wider: the hot water setpoint 35-95 °C in the table is capped at 65 °C here
  * (DHW_CAP), whatever the configuration or the controller would accept.
  */
 export const BOUNDS = {
@@ -217,8 +217,8 @@ export const BOUNDS = {
   roomSetpoint: { min: 15, max: 30, step: 0.5 },
 };
 
-/** The hot water ceiling of the configuration, in °C: never above 60 °C. */
-export const DHW_CAP = { min: 35, max: 60, default: 55 };
+/** The hot water ceiling of the configuration, in °C: never above 65 °C. */
+export const DHW_CAP = { min: 35, max: 65, default: 65 };
 
 export const ACTIONS = {
   TEST_CONNECTION: 'test_connection',

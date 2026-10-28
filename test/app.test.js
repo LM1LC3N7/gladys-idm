@@ -39,7 +39,7 @@ test('discovery: one device, the values read and published, special values left 
   assert.ok(!roles.includes('temperature-solar-collector'), 'no solar feature without solar');
   assert.ok(!roles.includes('humidity'), 'no humidity sensor');
   const dhw = device.features.find((f) => f.external_id === feature('dhw-setpoint'));
-  assert.equal(dhw.max, 55, 'hot water: the ceiling of the configuration (55 °C by default)');
+  assert.equal(dhw.max, 65, 'hot water: the ceiling of the configuration (65 °C by default)');
   assert.equal(ctx.state('temperature-outdoor').state, 4.5);
   assert.equal(ctx.state('temperature-dhw-top').state, 48.3);
   assert.equal(ctx.state('dhw-setpoint').state, 48);
@@ -115,21 +115,21 @@ test('a mode: decided on a fresh read, written, confirmed by the read back', asy
   assert.match(String(holiday.error), /seulement affiché/);
 });
 
-test('hot water: bounded by the ceiling, never above 60 °C, whatever the configuration', async (t) => {
+test('hot water: bounded by the ceiling, never above 65 °C, whatever the configuration', async (t) => {
   const ctx = await setup({ config: { ...ALLOW, dhw_max_temperature: 90 } });
   t.after(ctx.stop);
-  for (const value of [61, 65, 95, 34, 50.5, '', null, 'abc', '55.0.1']) {
+  for (const value of [65.5, 66, 70, 95, 34, 50.5, '', null, 'abc', '55.0.1']) {
     const ack = await ctx.press('dhw-setpoint', value, 200);
     assert.equal(ack.success, false, `${value} refused`);
   }
   assert.deepEqual(ctx.hp.writes(), []);
-  const ack = await ctx.press('dhw-setpoint', 60);
+  const ack = await ctx.press('dhw-setpoint', 65);
   assert.equal(ack.success, true, String(ack.error));
-  assert.equal(ctx.hp.get(1032), 60);
+  assert.equal(ctx.hp.get(1032), 65);
   ctx.app.configUpdated({ ...ALLOW, dhw_max_temperature: 50 });
   const capped = await ctx.press('dhw-setpoint', 52);
   assert.match(String(capped.error), /plafond/);
-  assert.equal(ctx.hp.get(1032), 60);
+  assert.equal(ctx.hp.get(1032), 65);
 });
 
 test('room setpoint: 15 to 30 °C by 0.5, written as a FLOAT, low word first', async (t) => {

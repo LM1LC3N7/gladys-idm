@@ -4,7 +4,7 @@
 NAVIGATOR 2.0 controller**, through its **Modbus TCP** interface on the local network (port 502, no
 cloud, no password): temperatures, operating mode and state, fault, compressor, charge pump, heating
 circuits A to G, hot water, solar temperatures and electrical power; mode and setpoint commands behind
-an off-by-default option (hot water capped at 60 °C, 55 °C by default), standby and circuit off never
+an off-by-default option (hot water capped at 65 °C, 65 °C by default), standby and circuit off never
 behind that option. **Never tested with a real device. Not affiliated with iDM.** Modbus TCP has no
 authentication: keep the heat pump on a trusted network.
 

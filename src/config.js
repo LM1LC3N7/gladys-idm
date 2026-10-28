@@ -90,7 +90,7 @@ export function parseCircuits(raw) {
 
 /**
  * The hot water ceiling: whole degrees between DHW_CAP.min and DHW_CAP.max
- * (60 °C), else the default (55 °C). Rounded down: never above what was typed.
+ * (65 °C), else the default (65 °C). Rounded down: never above what was typed.
  */
 export function dhwCapOf(value) {
   const number =

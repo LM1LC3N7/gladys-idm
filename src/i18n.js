@@ -161,8 +161,8 @@ export const ERRORS = {
     ),
   dhwCap: (cap) =>
     both(
-      `Above the hot water ceiling of the configuration (${cap} °C, 60 °C at most): not sent.`,
-      `Au-dessus du plafond d’eau chaude de la configuration (${cap} °C, 60 °C au plus) : non envoyé.`,
+      `Above the hot water ceiling of the configuration (${cap} °C, 65 °C at most): not sent.`,
+      `Au-dessus du plafond d’eau chaude de la configuration (${cap} °C, 65 °C au plus) : non envoyé.`,
     ),
   disabled: both(
     'Commands are disabled: turn on "Allow the commands" in the configuration of the integration.',

@@ -61,7 +61,7 @@ test/kit/                 virtual and real clocks, fake TCP server (from gladys-
   through `useLine`; commands take the line from a poll, stops from anything.
 - **Commands**: never a switch or a writable binary; refused unless
   `allow_commands` (checked on arrival and in `beforeSend`); bounded on
-  arrival and in `beforeSend`; hot water never above 60 °C (also in
+  arrival and in `beforeSend`; hot water never above 65 °C (also in
   `writeRequest`); decided on a fresh read; confirmed only by the echo and a
   read back equal to the value asked; EEPROM quota; never retried.
 - **Stops** (`standby`, circuit `off`): never behind the option, bounds, a

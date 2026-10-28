@@ -28,7 +28,7 @@ change the modes and setpoints.
 | Modbus unit id              | 1 on a NAVIGATOR.                                                                |
 | Heating circuits            | The letters of your circuits, A to G, separated by commas (`A` by default).      |
 | Allow the commands          | Off by default (see below).                                                      |
-| Hot water ceiling (°C)      | The highest hot water setpoint Gladys may send: 55 °C by default, 60 °C at most. |
+| Hot water ceiling (°C)      | The highest hot water setpoint Gladys may send: 65 °C by default, 65 °C at most. |
 | Refresh interval            | 60 s by default, 30 s to 1 h.                                                    |
 | Language                    | Language of the device names, the status and the messages.                       |
 
@@ -60,8 +60,8 @@ Off by default. With "Allow the commands", Gladys may change:
   only);
 - the mode of a configured circuit (time program, normal, eco, manual heating, manual cooling);
 - the "normal" room setpoint of a circuit, 15 to 30 °C by 0.5 °C;
-- the hot water setpoint, in whole degrees, from 35 °C to the ceiling of the configuration (55 °C by
-  default). **Nothing above 60 °C is ever sent**, whatever is typed.
+- the hot water setpoint, in whole degrees, from 35 °C to the ceiling of the configuration (65 °C by
+  default). **Nothing above 65 °C is ever sent**, whatever is typed.
 
 Each command first reads the current value on the heat pump, writes nothing when it is already right,
 then reads the written value back: it succeeds only when the read back shows the value asked.

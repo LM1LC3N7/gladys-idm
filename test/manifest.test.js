@@ -109,8 +109,8 @@ test('the configuration matches the code; the commands are off by default', () =
       fields.dhw_max_temperature.max,
       fields.dhw_max_temperature.default,
     ],
-    [DHW_CAP.min, 60, 55],
-    'hot water: 55 °C by default, 60 °C at most',
+    [DHW_CAP.min, 65, 65],
+    'hot water: 65 °C by default, 65 °C at most',
   );
   assert.ok(
     manifest.config_schema.every((f) => !f.key.startsWith('gladys_')),

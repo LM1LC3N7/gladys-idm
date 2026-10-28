@@ -21,8 +21,8 @@
         "fr": "Votre pompe à chaleur iDM"
       },
       "description": {
-        "en": "Shows your iDM heat pump with the NAVIGATOR 2.0 controller in Gladys through Modbus TCP (port 502) on your local network, without any cloud: temperatures, mode and state, fault, compressor, heating circuits, hot water, solar and power when the heat pump gives them. Have \"Modbus TCP\" set to \"On\" in the \"Building management\" menu of the NAVIGATOR (installer level; the web interface alone is not enough), enter its IP address, save, then add the heat pump from the Discovery tab. Modes and setpoints change only if you allow the commands below; hot water never above 60 °C. Standby and turning a circuit off never depend on that option (see the guide for when they can fail). NAVIGATOR 2.0 only. Modbus TCP has no password: keep the heat pump on a trusted network. Never tested with a real device. Not affiliated with iDM.",
-        "fr": "Affiche votre pompe à chaleur iDM à régulation NAVIGATOR 2.0 dans Gladys par Modbus TCP (port 502) sur votre réseau local, sans cloud : températures, mode et état, défaut, compresseur, circuits de chauffage, eau chaude, solaire et puissance quand la pompe les donne. Faites régler « Modbus TCP » sur « Marche » dans le menu « Gestion technique du bâtiment » du NAVIGATOR (niveau installateur ; l’interface web seule ne suffit pas), saisissez son adresse IP, enregistrez, puis ajoutez la pompe depuis l’onglet Découverte. Modes et consignes ne changent que si vous autorisez les commandes ci-dessous ; eau chaude jamais au-dessus de 60 °C. La veille et l’arrêt d’un circuit ne dépendent jamais de cette option (voir le guide pour les cas d’échec). NAVIGATOR 2.0 seulement. Le Modbus TCP n’a pas de mot de passe : gardez la pompe sur un réseau de confiance. Jamais testé avec un vrai appareil. Sans lien avec iDM."
+        "en": "Shows your iDM heat pump with the NAVIGATOR 2.0 controller in Gladys through Modbus TCP (port 502) on your local network, without any cloud: temperatures, mode and state, fault, compressor, heating circuits, hot water, solar and power when the heat pump gives them. Have \"Modbus TCP\" set to \"On\" in the \"Building management\" menu of the NAVIGATOR (installer level; the web interface alone is not enough), enter its IP address, save, then add the heat pump from the Discovery tab. Modes and setpoints change only if you allow the commands below; hot water never above 65 °C. Standby and turning a circuit off never depend on that option (see the guide for when they can fail). NAVIGATOR 2.0 only. Modbus TCP has no password: keep the heat pump on a trusted network. Never tested with a real device. Not affiliated with iDM.",
+        "fr": "Affiche votre pompe à chaleur iDM à régulation NAVIGATOR 2.0 dans Gladys par Modbus TCP (port 502) sur votre réseau local, sans cloud : températures, mode et état, défaut, compresseur, circuits de chauffage, eau chaude, solaire et puissance quand la pompe les donne. Faites régler « Modbus TCP » sur « Marche » dans le menu « Gestion technique du bâtiment » du NAVIGATOR (niveau installateur ; l’interface web seule ne suffit pas), saisissez son adresse IP, enregistrez, puis ajoutez la pompe depuis l’onglet Découverte. Modes et consignes ne changent que si vous autorisez les commandes ci-dessous ; eau chaude jamais au-dessus de 65 °C. La veille et l’arrêt d’un circuit ne dépendent jamais de cette option (voir le guide pour les cas d’échec). NAVIGATOR 2.0 seulement. Le Modbus TCP n’a pas de mot de passe : gardez la pompe sur un réseau de confiance. Jamais testé avec un vrai appareil. Sans lien avec iDM."
       },
       "links": [
         {
@@ -115,13 +115,13 @@
         "fr": "Plafond d’eau chaude (°C)"
       },
       "description": {
-        "en": "The highest hot water setpoint Gladys may send, 35 to 60 °C (55 °C by default). Nothing above 60 °C is ever sent, whatever is typed here.",
-        "fr": "La consigne d’eau chaude la plus haute que Gladys peut envoyer, de 35 à 60 °C (55 °C par défaut). Rien au-dessus de 60 °C n’est jamais envoyé, quoi qu’il soit saisi ici."
+        "en": "The highest hot water setpoint Gladys may send, 35 to 65 °C (65 °C by default). Nothing above 65 °C is ever sent, whatever is typed here.",
+        "fr": "La consigne d’eau chaude la plus haute que Gladys peut envoyer, de 35 à 65 °C (65 °C par défaut). Rien au-dessus de 65 °C n’est jamais envoyé, quoi qu’il soit saisi ici."
       },
       "required": false,
-      "default": 55,
+      "default": 65,
       "min": 35,
-      "max": 60
+      "max": 65
     },
     {
       "key": "poll_interval",

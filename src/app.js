@@ -23,7 +23,7 @@
 //   - refused unless "Allow the commands" is on, checked on arrival and again
 //     right before the write (nothing runs in between);
 //   - bounded on arrival and right before the write: hot water 35 °C to the
-//     ceiling of the configuration (55 °C by default, 60 °C at most), room
+//     ceiling of the configuration (65 °C by default, 65 °C at most), room
 //     15-30 °C by 0.5;
 //   - decided on a fresh read of the register written, in the same session,
 //     never on the state in memory; refused when it cannot be read; not
@@ -1036,7 +1036,7 @@ export class IdmApp {
     return { written: number, expected: number };
   }
 
-  /** The hot water bounds, on the configuration of now: 35 °C to the ceiling (60 °C at most). */
+  /** The hot water bounds, on the configuration of now: 35 °C to the ceiling (65 °C at most). */
   checkDhw(number) {
     const top = Math.min(DHW_CAP.max, BOUNDS.dhwSetpoint.max);
     if (number < BOUNDS.dhwSetpoint.min || number > top) {

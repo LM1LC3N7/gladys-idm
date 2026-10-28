@@ -29,7 +29,7 @@ changer les modes et les consignes.
 | Identifiant d’unité Modbus       | 1 sur un NAVIGATOR.                                                                               |
 | Circuits de chauffage            | Les lettres de vos circuits, de A à G, séparées par des virgules (`A` par défaut).                |
 | Autoriser les commandes          | Désactivé par défaut (voir plus bas).                                                             |
-| Plafond d’eau chaude (°C)        | La consigne d’eau chaude la plus haute que Gladys peut envoyer : 55 °C par défaut, 60 °C au plus. |
+| Plafond d’eau chaude (°C)        | La consigne d’eau chaude la plus haute que Gladys peut envoyer : 65 °C par défaut, 65 °C au plus. |
 | Intervalle de rafraîchissement   | 60 s par défaut, de 30 s à 1 h.                                                                   |
 | Langue                           | Langue des noms de l’appareil, du statut et des messages.                                         |
 
@@ -65,8 +65,8 @@ Désactivées par défaut. Avec « Autoriser les commandes », Gladys peut chang
 - le mode d’un circuit configuré (programme horaire, normal, éco, chauffage manuel, rafraîchissement
   manuel) ;
 - la consigne ambiante « normal » d’un circuit, de 15 à 30 °C par pas de 0,5 °C ;
-- la consigne d’eau chaude, en degrés entiers, de 35 °C au plafond de la configuration (55 °C par
-  défaut). **Rien au-dessus de 60 °C n’est jamais envoyé**, quoi qu’il soit saisi.
+- la consigne d’eau chaude, en degrés entiers, de 35 °C au plafond de la configuration (65 °C par
+  défaut). **Rien au-dessus de 65 °C n’est jamais envoyé**, quoi qu’il soit saisi.
 
 Chaque commande relit d’abord la valeur actuelle sur la pompe à chaleur, n’écrit rien si elle est
 déjà la bonne, puis relit la valeur écrite : elle n’est réussie que si la relecture montre la valeur

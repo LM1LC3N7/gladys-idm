@@ -26,7 +26,7 @@ UCHAR 0xFFFF) and the reads by runs of contiguous data points.
 Changed: every address is checked against iDM's own documentation ("MODBUS
 TCP NAVIGATOR 10", 812663 Rev.0, table of 2025-06-18), the ranges of the
 writes are those of that table, never wider (hot water setpoint capped at
-60 °C); -1.0 is a real temperature on the outdoor and heat pump flow/return
+65 °C); -1.0 is a real temperature on the outdoor and heat pump flow/return
 sensors; the charge pump's -1 is published as "off"; the writes are limited
 per hour (EEPROM); stops are never held back. Nothing of its Home Assistant
 code (entities, services, config flow) is used.

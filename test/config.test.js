@@ -29,12 +29,13 @@ test('circuits: letters A to G only, nothing guessed', () => {
   assert.deepEqual(parseCircuits(42), { circuits: [], invalid: false });
 });
 
-test('hot water ceiling: 55 °C by default, 35 to 60 °C, rounded down', () => {
-  assert.equal(dhwCapOf(undefined), 55);
-  assert.equal(dhwCapOf(''), 55);
-  assert.equal(dhwCapOf(null), 55);
-  assert.equal(dhwCapOf(90), 60);
-  assert.equal(dhwCapOf('59.9'), 59);
+test('hot water ceiling: 65 °C by default, 35 to 65 °C, rounded down', () => {
+  assert.equal(dhwCapOf(undefined), 65);
+  assert.equal(dhwCapOf(''), 65);
+  assert.equal(dhwCapOf(null), 65);
+  assert.equal(dhwCapOf(90), 65);
+  assert.equal(dhwCapOf(65.5), 65);
+  assert.equal(dhwCapOf('64.9'), 64);
   assert.equal(dhwCapOf(10), 35);
 });
 

@@ -269,7 +269,7 @@ export function buildDevice(gladys, { language, roles, dhwCap = DHW_CAP.default 
         name: nameOf(role, language),
         external_id: i.feature(role),
         ...entry.definition,
-        // The hot water slider stops at the ceiling of the configuration (60 °C at most).
+        // The hot water slider stops at the ceiling of the configuration (65 °C at most).
         ...(role === F.DHW_SETPOINT ? { max: Math.min(DHW_CAP.max, dhwCap) } : {}),
         ...(options
           ? {

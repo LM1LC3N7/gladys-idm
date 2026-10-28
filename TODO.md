@@ -96,7 +96,7 @@ to date at the end of every milestone.
 - **Commands**: system mode (standby, automatic, away, hot water only,
   heating/cooling only; holiday shown, never written), circuit mode (all six,
   off = stop), circuit room setpoint "normal" 15-30 °C by 0.5 (iDM table),
-  hot water 35 °C (iDM minimum) to min(ceiling, 60 °C), whole degrees.
+  hot water 35 °C (iDM minimum) to min(ceiling, 65 °C), whole degrees.
   `text/select`, `water-heater/target-temperature`,
   `thermostat/target-temperature`: never a switch.
 - **Stops**: 1005 = 0 (standby) and 1393+i = 0 (circuit off). A click is
@@ -120,7 +120,7 @@ to date at the end of every milestone.
   by a restart), never for a lower setpoint; stops neither count nor are
   limited (four writes at most per click: the stop and three resends).
 - **Mutants left alive on purpose (r1)**: `checkDhw` "> top" (the config
-  ceiling, ≤ 60, catches the same), the option in `beforeSend` (checked
+  ceiling, ≤ 65, catches the same), the option in `beforeSend` (checked
   synchronously just before, after the fresh read: no window), the
   "never sooner" clamp of `schedule` (every caller already waits at least
   the interval or `firstWait`), `startedAt <= lastSentAt` (no write can run
