@@ -1,6 +1,6 @@
 {
   "name": "gladys-idm",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Gladys Assistant external integration for iDM heat pumps (NAVIGATOR 2.0) over local Modbus TCP: temperatures, state, heating circuits, hot water, solar, power; optional setpoint and mode commands, capped hot water setpoint, stops never held back. Unofficial, not affiliated with iDM.",
   "type": "module",

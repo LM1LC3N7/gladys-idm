@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-28
+
 ### Changed
 
 - Hot water ceiling raised to 65 °C (default 65 °C), device limits still apply.
@@ -29,5 +31,6 @@ the notes of the version's GitHub Release.
   by the next reads and after a restart.
 - "Test the connection" button, docs in English and French, cover image.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-idm/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/LM1LC3N7/gladys-idm/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/LM1LC3N7/gladys-idm/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/LM1LC3N7/gladys-idm/releases/tag/v0.1.1
